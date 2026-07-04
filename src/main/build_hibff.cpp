@@ -18,7 +18,7 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "-fof" || arg == "--fof") {
             if (i + 1 < argc) fof_file = argv[++i];
-        } else if (arg == "-k" || arg == "--kmer") {
+        } else if (arg == "-k" || arg == "--kmer" || arg == "--k") {
             if (i + 1 < argc) kmer_size = std::stoi(argv[++i]);
         } else if (arg == "-t" || arg == "--threads") {
             if (i + 1 < argc) threads = std::stoi(argv[++i]);

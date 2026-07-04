@@ -32,6 +32,17 @@ int main(int argc, char** argv) {
         archive(index);
     }
 
+    // Try to load stash map if it exists
+    std::string stashmap_path = index_path.substr(0, index_path.find_last_of('.')) + ".stashmap";
+    taxor::stash_map_type stash_map{};
+    if (std::filesystem::exists(stashmap_path)) {
+        std::cout << "Loading stash map from " << stashmap_path << "..." << std::endl;
+        std::ifstream is(stashmap_path, std::ios::binary);
+        cereal::BinaryInputArchive archive(is);
+        archive(stash_map);
+    }
+
+
     uint8_t kmer_size = index.kmer_size();
     auto hash_adaptor = seqan3::views::minimiser_hash(seqan3::shape{seqan3::ungapped{kmer_size}},
                                                       seqan3::window_size{kmer_size},
@@ -83,6 +94,18 @@ int main(int argc, char** argv) {
                     bool found = false;
                     for (auto const & pair : result) {
                         if (pair.first == expected_user_bin) { found = true; break; }
+                    }
+                    if (!found) {
+                        // Check stash map
+                        auto stash_it = stash_map.find(hash);
+                        if (stash_it != stash_map.end()) {
+                            for (uint64_t u_bin : stash_it->second) {
+                                if (u_bin == expected_user_bin) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                        }
                     }
                     if (!found) { fn_count++; }
                 }
