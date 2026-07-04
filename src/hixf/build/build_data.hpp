@@ -1,0 +1,76 @@
+// --------------------------------------------------------------------------------------------------
+// Copyright (c) 2006-2023, Knut Reinert & Freie Universität Berlin
+// Copyright (c) 2016-2023, Knut Reinert & MPI für molekulare Genetik
+// This file may be used, modified and/or redistributed under the terms of the 3-clause BSD-License
+// shipped with this file and also available at: https://github.com/JensUweUlrich/Taxor/blob/main/LICENSE.md
+// --------------------------------------------------------------------------------------------------
+
+#pragma once
+
+#include <atomic>
+#include <unordered_map>
+#include <vector>
+#include <mutex>
+#include <utility>
+#include <seqan3/std/new>
+
+#include "node_data.hpp"
+#include "hierarchical_interleaved_xor_filter.hpp"
+
+namespace hixf
+{
+
+
+struct build_data
+{
+    alignas(std::hardware_destructive_interference_size) std::atomic<size_t> ixf_number{};
+    alignas(std::hardware_destructive_interference_size) std::atomic<size_t> user_bin_number{};
+
+    size_t number_of_user_bins{};
+    size_t number_of_ixfs{};
+
+    lemon::ListDigraph ixf_graph{};
+    lemon::ListDigraph::NodeMap<node_data> node_map{ixf_graph};
+
+    hierarchical_interleaved_xor_filter<uint8_t> hixf{};
+    std::vector<double> fp_correction{};
+
+    //!\brief Global stash map: kmer -> vector of bin locations (ixf_idx, bin_idx)
+    std::unordered_map<uint64_t, std::vector<std::pair<uint32_t, uint32_t>>> stash_map{};
+    //!\brief Mutex for thread-safe stash_map access
+    std::mutex stash_map_mutex{};
+
+    size_t request_ixf_idx()
+    {
+        return std::atomic_fetch_add(&ixf_number, 1u);
+    }
+
+    size_t request_user_bin_idx()
+    {
+        return std::atomic_fetch_add(&user_bin_number, 1u);
+    }
+
+    void resize()
+    {
+        hixf.ixf_vector.resize(number_of_ixfs);
+        hixf.user_bins.set_ixf_count(number_of_ixfs);
+        hixf.user_bins.set_user_bin_count(number_of_user_bins);
+        hixf.next_ixf_id.resize(number_of_ixfs);
+    }
+
+    void compute_fp_correction(size_t const tmax, size_t const hash, double const fpr)
+    {
+        fp_correction.resize(tmax + 1, 1.0);
+
+        double const denominator = std::log(1 - std::exp(std::log(fpr) / hash));
+
+        for (size_t i = 2; i <= tmax; ++i)
+        {
+            double const tmp = 1.0 - std::pow(1 - fpr, static_cast<double>(i));
+            fp_correction[i] = std::log(1 - std::exp(std::log(tmp) / hash)) / denominator;
+            assert(fp_correction[i] >= 1.0);
+        }
+    }
+};
+
+} 
