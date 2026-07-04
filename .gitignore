@@ -43,6 +43,7 @@ src/.project
 
 # directories
 /build/
+/data/
 
 # Usage examples for BFFs
 src/hixf/binaryfusefilter.h
