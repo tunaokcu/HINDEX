@@ -35,12 +35,16 @@ int main(int argc, char** argv) {
 
     // Try to load stash map if it exists
     std::string stashmap_path = index_path.substr(0, index_path.find_last_of('.')) + ".stashmap";
-    taxor::stash_map_type stash_map{};
+    taxor::stash_map_type tmp_stash{};
+    taxor::inverted_stash_type inverted_stash{};
+    bool has_stash = false;
     if (std::filesystem::exists(stashmap_path)) {
         std::cout << "Loading stash map from " << stashmap_path << "..." << std::endl;
         std::ifstream is(stashmap_path, std::ios::binary);
         cereal::BinaryInputArchive archive(is);
-        archive(stash_map);
+        archive(tmp_stash);
+        inverted_stash = taxor::invert_stash_map(tmp_stash);
+        has_stash = true;
     }
 
 
@@ -49,7 +53,7 @@ int main(int argc, char** argv) {
                                                       seqan3::window_size{kmer_size},
                                                       seqan3::seed{hixf::adjust_seed(kmer_size)});
     using traits_type = hixf::dna4_traits;
-    auto agent = index.ixf().membership_agent();
+    auto agent = has_stash ? index.ixf().membership_agent(&inverted_stash) : index.ixf().membership_agent();
     
     std::ifstream binning_file(binning_path);
     std::string line;
@@ -95,18 +99,6 @@ int main(int argc, char** argv) {
                     bool found = false;
                     for (auto const & pair : result) {
                         if (pair.first == expected_user_bin) { found = true; break; }
-                    }
-                    if (!found) {
-                        // Check stash map
-                        auto stash_it = stash_map.find(hash);
-                        if (stash_it != stash_map.end()) {
-                            for (uint64_t u_bin : stash_it->second) {
-                                if (u_bin == expected_user_bin) {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
                     }
                     if (!found) { fn_count++; }
                 }
