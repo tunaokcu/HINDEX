@@ -1,6 +1,6 @@
-# FUSOR-hibff
+# HINDEX
 
-FUSOR-hibff is an optimized pipeline and indexer for building Hybrid Hierarchical Interleaved Binary Fuse Filter (HHIBFF) indexes over large sets of FASTA/FASTQ genomic references. It wraps FUSOR.
+HINDEX is an optimized pipeline and indexer for building Hybrid Hierarchical Interleaved Binary Fuse Filter (HHIBFF) indexes over large sets of FASTA/FASTQ genomic references. It wraps FUSOR.
 
 ## Requirements
 
