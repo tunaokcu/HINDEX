@@ -226,6 +226,12 @@ size_t determine_best_number_of_technical_bins(chopper::layout::data_store & dat
     {
         std::set<size_t> result;
 
+        if (!config.determine_best_tmax)
+        {
+            result.insert(config.tmax);
+            return result;
+        }
+
         for (size_t t_max = 64; t_max <= config.tmax; t_max *= 2)
             result.insert(t_max);
 
