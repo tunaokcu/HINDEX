@@ -12,6 +12,7 @@
 #include <cereal/archives/binary.hpp>
 
 #include "index.hpp"
+#include "store_stash_map.hpp"
 #include <build/adjust_seed.hpp>
 #include <build/dna4_traits.hpp>
 
