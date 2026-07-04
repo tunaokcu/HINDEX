@@ -657,6 +657,11 @@ void create_layout(taxor::build::configuration const taxor_config,
     layout_config.determine_best_tmax = !taxor_config.interleaved_only;
     layout_config.estimate_union = !taxor_config.fast_layout;
     layout_config.tmax = taxor_config.interleaved_only ? data.kmer_counts.size() : 4096;
+    
+    //TODO very hacky solution, fix
+    if (taxor_config.interleaved_only) {
+        layout_config.alpha = 1000000.0; // Heavily penalize merging to force flat layout
+    }
     layout_config.threads = taxor_config.threads;
 
 	std::stringstream output_buffer;

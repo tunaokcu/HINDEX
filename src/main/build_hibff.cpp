@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
             if (i + 1 < argc) kmer_size = std::stoi(argv[++i]);
         } else if (arg == "-t" || arg == "--threads") {
             if (i + 1 < argc) threads = std::stoi(argv[++i]);
-        } else if (arg == "-o" || arg == "--out") {
+        } else if (arg == "-o" || arg == "--out" || arg == "--output") {
             if (i + 1 < argc) output_file = argv[++i];
         } else if (arg == "--interleaved") {
             interleaved = true;
