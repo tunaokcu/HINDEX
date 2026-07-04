@@ -1,6 +1,6 @@
 # FUSOR-hibff
 
-FUSOR-hibff is an optimized pipeline and indexer for building Hierarchical Interleaved Binary Fuse Filter (HIBFF) indexes over large sets of FASTA/FASTQ genomic references. It builds upon FUSOR to enable low false-positive rate k-mer matching with significantly reduced memory footprints and improved scaling for large datasets.
+FUSOR-hibff is an optimized pipeline and indexer for building Hybrid Hierarchical Interleaved Binary Fuse Filter (HHIBFF) indexes over large sets of FASTA/FASTQ genomic references. It wraps FUSOR.
 
 ## Requirements
 
@@ -47,9 +47,9 @@ Important build options:
 
 - `--fof`: File containing paths to reference genomes.
 - `-k`, `--k`: Canonical k-mer length.
-- `--interleaved`: Forces an interleaved HIBFF layout mapping technical bins directly to reference genomes.
-- `--optimize-memory`: Employs an advanced layout calculation algorithm prioritizing the absolute minimum RAM and disk footprint over theoretical query speed.
-- `--fast-layout`: Optionally disables exhaustive layout calculation for faster graph compilation.
+- `--interleaved`: Forces an interleaved HIBFF layout mapping technical bins directly to reference genomes. Leaving it out builds a hierarchical interleaved index.
+- `--optimize-memory`: Forces the layout calculation algorithm to pick the layout that minimizes the index. The default behavior, without this flag, is to minimize the expected query time of the index. 
+- `--fast-layout`: Optionally disables exhaustive layout calculation for a faster build.
 
 ## Searching the Index
 
@@ -63,11 +63,5 @@ build/main/fusor search \
   --threads 4
 ```
 
-## Testing and Verification
-
-You can verify the accuracy of the generated index using the provided `verify_fusor` utility. It compares index query results against an expected layout or binning output.
-
-```bash
-build/main/verify_fusor database.hixf expected_binning.out > verify_out.txt
-grep FAIL verify_out.txt || echo "ALL SUCCESS"
-```
+## Some notes
+determine_best_number_of_technical_bins in src/main/taxor_build.cpp is responsible for calculating the optimal layout for the HHIBFF.

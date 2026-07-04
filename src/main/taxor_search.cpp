@@ -160,7 +160,6 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
     double index_io_time{0.0};
     double reads_io_time{0.0};
     double compute_time{0.0};
-    hixf::threshold::threshold thresholder;
     // map hixf user bin to species list index position
     std::map<size_t, size_t> user_bin_index{};
 
@@ -181,14 +180,9 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
         arguments.window_size = index.window_size();
         arguments.scaling = index.scaling();
         arguments.shape = seqan3::shape{seqan3::ungapped{arguments.shape_size}};
-        hixf::threshold_parameters param = arguments.make_threshold_parameters();
-        thresholder = hixf::threshold::threshold{param};
         for (size_t i = 0; i < index.species().size(); ++i)
         {
             user_bin_index.emplace(std::make_pair(index.species().at(i).user_bin, i));
-            //if (index.species().at(i).taxid.compare("160232") == 0)
-            //            std::cerr << index.species().at(user_bin_index[count.first]).organism_name << "\t" << count.first << "\t" << count.second << std::endl;
-
         }
     };
     auto cereal_handle = std::async(std::launch::async, cereal_worker);
@@ -197,16 +191,10 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
     using record_type = typename decltype(fin)::record_type;
     std::vector<record_type> records{};
 
-/*    hixf::sync_out synced_out{arguments.out_file};
-
-    {
-        synced_out << "#QUERY_NAME\tACCESSION\tREFERENCE_NAME\tTAXID\tREF_LEN\tQUERY_LEN\tQHASH_COUNT\tQHASH_MATCH\tTAX_STR\tTAX_ID_STR\n";
-    }
-*/
-    
     std::mutex count_mutex;
-    double mean_sum{0.0};
-    uint16_t reads{0};
+    std::map<size_t, uint64_t> global_counts{};
+    uint64_t global_total_features = 0;
+
     auto worker = [&](size_t const start, size_t const end)
     {
         auto counter = [&index, &stash_map, has_stash]()
@@ -216,7 +204,10 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
             else
                 return index.ixf().membership_agent();
         }();
-        std::string result_string{};
+        
+        std::map<size_t, uint64_t> local_counts{};
+        uint64_t local_total_features = 0;
+        
         std::vector<uint64_t> hashes;
         
         /*auto scaling = [s_factor](uint64_t i) { uint64_t v = ankerl::unordered_dense::detail::wyhash::hash(i);
@@ -230,8 +221,6 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
 
         for (auto && [id, seq] : records | seqan3::views::slice(start, end))
         {
-            result_string.clear();
-
             
             if (arguments.compute_syncmer)
             {
@@ -276,56 +265,22 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
                 
             }
             size_t const hash_count{hashes.size()};
-            size_t fp_correction = hash_count * 0.003;
-            size_t threshold = thresholder.get(hash_count, (double)hash_count / ((double)seq.size() - (double)index.kmer_size() + 1.0));
+            local_total_features += hash_count;
 
-            auto & result = counter.bulk_contains(hashes, threshold); // Results contains user bin IDs
+            auto & result = counter.bulk_contains(hashes, 1); // Results contains user bin IDs with at least 1 match
             hashes.clear();
-            // write one line per reference match 
-            if (result.empty())
+            
+            for (auto && count : result)
             {
-                result_string += id + '\t';
-                result_string += "-\t-\t-\t-\t";
-                result_string += std::to_string(seq.size()) + "\n";
+                local_counts[count.first] += count.second;
             }
-            else{
-                uint64_t max_count = 0;
-                for (auto && count : result)
-                {
-                    if (count.second > max_count)
-                        max_count = count.second;
-                }
+        }
 
-                for (auto && count : result)
-                {
-                    // filter out counts that have less than max_count*0.8 matching hashes
-                    if (static_cast<double>(count.second) < static_cast<double>(max_count) * 0.8)
-                        continue;
-                    result_string += id + '\t';
-                    result_string += index.species().at(user_bin_index[count.first]).accession_id;
-                    result_string += '\t';
-                    result_string += index.species().at(user_bin_index[count.first]).organism_name;
-                    result_string += '\t';
-                    result_string += index.species().at(user_bin_index[count.first]).taxid;
-                    result_string += '\t';
-                    result_string += std::to_string(index.species().at(user_bin_index[count.first]).seq_len);
-                    result_string += '\t';
-                    result_string += std::to_string(seq.size());
-                    result_string += '\t';
-                    result_string += std::to_string(hash_count);
-                    result_string += '\t';
-                    result_string += std::to_string(count.second);
-                    result_string += '\t';
-                    result_string += index.species().at(user_bin_index[count.first]).taxnames_string;
-                    result_string += '\t';
-                    result_string += index.species().at(user_bin_index[count.first]).taxid_string;
-                    result_string += '\n';
-                }
-            }
-            count_mutex.lock();
-            reads++;
-            count_mutex.unlock();
-            outstrm.write(result_string);
+        std::lock_guard<std::mutex> lock(count_mutex);
+        global_total_features += local_total_features;
+        for (auto const & [bin, count] : local_counts)
+        {
+            global_counts[bin] += count;
         }
     };
   
@@ -352,12 +307,44 @@ void search_single(hixf::search_arguments & arguments, taxor_index<hixf_t> && in
                     << compute_time;
     }
     
+    std::string index_mode = arguments.compute_syncmer ? "syncmers" : "kmers";
+    double elapsed_s = compute_time + reads_io_time + index_io_time;
+    
+    std::filesystem::path query_path{arguments.query_file};
+    
+    std::ostringstream header;
+    header << "#query\t" << query_path.filename().string() 
+           << "\tk=" << (unsigned)arguments.shape_size 
+           << "\tindex_mode=" << index_mode 
+           << "\ttotal_features=" << global_total_features 
+           << "\tstack_probes=0\telapsed_s=" << std::fixed << std::setprecision(3) << elapsed_s << "\n";
+    header << "color_name\thits\ttotal_features\thit_ratio\n";
+    
+    outstrm.write(header.str());
+    
+    for (auto const & [bin, hits] : global_counts)
+    {
+        double hit_ratio = static_cast<double>(hits) / static_cast<double>(global_total_features);
+        if (hit_ratio >= arguments.threshold)
+        {
+            std::ostringstream line;
+            if (user_bin_index.count(bin) > 0 && user_bin_index[bin] < index.species().size()) {
+                line << index.species().at(user_bin_index[bin]).accession_id;
+            } else {
+                line << "unknown_bin_" << bin;
+            }
+            line << "\t"
+                 << hits << "\t"
+                 << global_total_features << "\t"
+                 << std::fixed << std::setprecision(6) << hit_ratio << "\n";
+            outstrm.write(line.str());
+        }
+    }
 }
 
 void search_hixf(taxor::search::configuration const config)
 {
     hixf::sync_out synced_out{config.report_file};
-    synced_out << "#QUERY_NAME\tACCESSION\tREFERENCE_NAME\tTAXID\tREF_LEN\tQUERY_LEN\tQHASH_COUNT\tQHASH_MATCH\tTAX_STR\tTAX_ID_STR\n";
     for (std::string query : config.query_file_list)
     {
         for (std::string hixf_file : config.index_file_list)
