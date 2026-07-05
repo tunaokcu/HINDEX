@@ -92,6 +92,11 @@ int main(int argc, char** argv) {
             size_t kmer_count = 0;
             for (auto & record : fin) {
                 auto hash_view = record.sequence() | hash_adaptor;
+            for (uint64_t hash : hash_view) {
+                if (hash == 12522882077899ull) {
+                    std::cout << "FOUND THE KMER! Genome bin is: " << expected_user_bin << std::endl;
+                }
+            }
                 for (uint64_t hash : hash_view) {
                     kmer_count++;
                     std::vector<uint64_t> query{hash};
@@ -100,7 +105,10 @@ int main(int argc, char** argv) {
                     for (auto const & pair : result) {
                         if (pair.first == expected_user_bin) { found = true; break; }
                     }
-                    if (!found) { fn_count++; }
+                    if (!found) { 
+                        fn_count++; 
+                        std::cout << "MISSING HASH: " << hash << std::endl; 
+                    }
                 }
             }
             if (fn_count > 0) {

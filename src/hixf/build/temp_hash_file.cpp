@@ -10,37 +10,31 @@ namespace hixf
 // Returns hixf_tmp, hixf_tmp1, hixf_tmp2, etc. depending on availability
 static std::filesystem::path get_tmp_directory()
 {
-    static std::filesystem::path cached_tmp_dir; // Cache the result
-    
-    if (!cached_tmp_dir.empty())
-        return cached_tmp_dir;
-    
-    auto base_dir = std::filesystem::current_path();
-    
-    // Try hixf_tmp first
-    auto tmp_dir = base_dir / "hixf_tmp";
-    if (!std::filesystem::exists(tmp_dir))
-    {
-        cached_tmp_dir = tmp_dir;
-        return cached_tmp_dir;
-    }
-    
-    // If hixf_tmp exists, try hixf_tmp1, hixf_tmp2, etc.
-    for (int i = 1; i < 1000; ++i) // Reasonable upper limit
-    {
-        tmp_dir = base_dir / ("hixf_tmp" + std::to_string(i));
+    static std::filesystem::path cached_tmp_dir = []() {
+        auto base_dir = std::filesystem::current_path();
+        
+        auto tmp_dir = base_dir / "hixf_tmp";
         if (!std::filesystem::exists(tmp_dir))
         {
-            cached_tmp_dir = tmp_dir;
-            return cached_tmp_dir;
+            std::filesystem::create_directory(tmp_dir);
+            return tmp_dir;
         }
-    }
+        
+        for (int i = 1; i < 1000; ++i)
+        {
+            tmp_dir = base_dir / ("hixf_tmp" + std::to_string(i));
+            if (!std::filesystem::exists(tmp_dir))
+            {
+                std::filesystem::create_directory(tmp_dir);
+                return tmp_dir;
+            }
+        }
+        
+        return base_dir / "hixf_tmp";
+    }();
     
-    // Fallback (should never happen unless 1000 directories exist)
-    cached_tmp_dir = base_dir / "hixf_tmp";
     return cached_tmp_dir;
 }
-
 
 void create_temp_hash_file(size_t const ixf_pos, ankerl::unordered_dense::set<size_t> &node_hashes)
 {
