@@ -15,6 +15,26 @@
 namespace hixf
 {
 
+// Global pool to reuse large vectors and avoid millions of page faults
+static std::vector<std::vector<size_t>> g_vector_pool;
+static std::mutex g_vector_pool_mutex;
+
+static std::vector<size_t> get_reusable_vector() {
+    std::lock_guard<std::mutex> lock(g_vector_pool_mutex);
+    if (!g_vector_pool.empty()) {
+        auto v = std::move(g_vector_pool.back());
+        g_vector_pool.pop_back();
+        return v;
+    }
+    return {};
+}
+
+static void return_reusable_vector(std::vector<size_t>&& v) {
+    v.clear();
+    std::lock_guard<std::mutex> lock(g_vector_pool_mutex);
+    g_vector_pool.push_back(std::move(v));
+}
+
 // Helper: number of 8-bit fingerprint bins that share a single uint64_t word
 // For uint8_t fingerprints: 64 / 8 = 8 bins per word
 static constexpr size_t BINS_PER_WORD = 8;
@@ -35,7 +55,7 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vec
     size_t max_bin_size = 0;
     for (const auto& hash_bin : node_hashes)
     {
-        std::vector<size_t> c{};
+        std::vector<size_t> c = get_reusable_vector();
         c.reserve(hash_bin.size());
         std::ranges::copy(hash_bin, std::back_inserter(c));
         if (c.size() > max_bin_size) max_bin_size = c.size();
@@ -101,24 +121,15 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vec
         std::atomic<bool> any_failed{false};
 
         #pragma omp parallel for num_threads(actual_threads) schedule(dynamic)
-        for (size_t batch = 0; batch < num_batches; ++batch)
+        for (size_t bin_idx = 0; bin_idx < num_bins; ++bin_idx)
         {
             if (any_failed.load(std::memory_order_relaxed)) continue;
+            if (tmp[bin_idx].empty()) continue;
 
-            size_t bin_start = batch * BINS_PER_WORD;
-            size_t bin_end = std::min(bin_start + BINS_PER_WORD, num_bins);
-
-            for (size_t bin_idx = bin_start; bin_idx < bin_end; ++bin_idx)
+            bool ok = std::visit([&](auto& f) { return f.add_bin_elements(bin_idx, tmp[bin_idx]); }, ixf);
+            if (!ok)
             {
-                if (any_failed.load(std::memory_order_relaxed)) break;
-                if (tmp[bin_idx].empty()) continue;
-
-                bool ok = std::visit([&](auto& f) { return f.add_bin_elements(bin_idx, tmp[bin_idx]); }, ixf);
-                if (!ok)
-                {
-                    any_failed.store(true, std::memory_order_relaxed);
-                    break;
-                }
+                any_failed.store(true, std::memory_order_relaxed);
             }
         }
 
@@ -135,6 +146,10 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vec
 
     if (has_failed) {
         std::cerr << "Success!" << std::endl;
+    }
+
+    for (auto& vec : tmp) {
+        return_reusable_vector(std::move(vec));
     }
 
     return std::move(ixf);
@@ -235,7 +250,7 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
 
                 for (size_t bin_idx = bin_start; bin_idx < bin_end; ++bin_idx)
                 {
-                    std::vector<size_t> hashes{};
+                    std::vector<size_t> hashes = get_reusable_vector();
                     if (child_bins.contains(bin_idx))
                     {
                         read_from_temp_hash_file(child_bins[bin_idx], hashes, tmp_files);
@@ -243,7 +258,10 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
                     else
                     {
                         read_from_temp_hash_file(current_node_ixf_pos, bin_idx, hashes, tmp_files);
-                        if (hashes.empty()) continue;
+                        if (hashes.empty()) {
+                            return_reusable_vector(std::move(hashes));
+                            continue;
+                        }
                     }
 
                     if (hashes.size() > max_bin_size)
@@ -261,26 +279,27 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
             std::atomic<bool> any_failed{false};
             size_t local_failed_bin_id = 0;
 
-            size_t actual_threads = std::min(static_cast<size_t>(threads), loaded_chunk.size());
+            std::vector<bin_entry*> flat_chunk;
+            for (auto& batch_bins : loaded_chunk) {
+                for (auto& entry : batch_bins) {
+                    flat_chunk.push_back(&entry);
+                }
+            }
+
+            size_t actual_threads = std::min(static_cast<size_t>(threads), flat_chunk.size());
 
             #pragma omp parallel for num_threads(actual_threads) schedule(dynamic)
-            for (size_t b = 0; b < loaded_chunk.size(); ++b)
+            for (size_t i = 0; i < flat_chunk.size(); ++i)
             {
                 if (any_failed.load(std::memory_order_relaxed)) continue;
 
-                // Process the 8 bins within this batch sequentially!
-                for (auto& entry : loaded_chunk[b])
+                auto* entry = flat_chunk[i];
+                bool ok = std::visit([&](auto& f) { return f.add_bin_elements(entry->bin_idx, entry->hashes); }, ixf);
+                
+                if (!ok)
                 {
-                    if (any_failed.load(std::memory_order_relaxed)) break;
-
-                    bool ok = std::visit([&](auto& f) { return f.add_bin_elements(entry.bin_idx, entry.hashes); }, ixf);
-                    
-                    if (!ok)
-                    {
-                        any_failed.store(true, std::memory_order_relaxed);
-                        local_failed_bin_id = entry.bin_idx;
-                        break;
-                    }
+                    any_failed.store(true, std::memory_order_relaxed);
+                    local_failed_bin_id = entry->bin_idx;
                 }
             }
 
@@ -288,6 +307,11 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
             {
                 success = false;
                 failed_bin_id = local_failed_bin_id;
+                for (auto& batch_bins : loaded_chunk) {
+                    for (auto& entry : batch_bins) {
+                        return_reusable_vector(std::move(entry.hashes));
+                    }
+                }
                 break; // Break chunk loop, trigger filter retry
             }
 
@@ -304,7 +328,12 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
                 }
             }
 
-            // Memory is automatically released here when loaded_chunk goes out of scope!
+            // Return memory to pool
+            for (auto& batch_bins : loaded_chunk) {
+                for (auto& entry : batch_bins) {
+                    return_reusable_vector(std::move(entry.hashes));
+                }
+            }
         }
 
         // Retry handler

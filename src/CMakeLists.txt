@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_SHARED_LIBS "Build using static libraries" OFF)
 
-set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++" ${CMAKE_CXX_STANDARD_LIBRARIES})
+set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++ /home/okcut/FUSOR-hibff/jemalloc_install/lib/libjemalloc.so" ${CMAKE_CXX_STANDARD_LIBRARIES})
 
 check_cxx_compiler_flag ("-fopenmp" HAS_OPENMP)
 if (HAS_OPENMP)
