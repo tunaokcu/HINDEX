@@ -15,7 +15,7 @@ find_library(JEMALLOC_LIB jemalloc HINTS ${CMAKE_CURRENT_SOURCE_DIR}/../jemalloc
 if (JEMALLOC_LIB)
     set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++ ${JEMALLOC_LIB}" ${CMAKE_CXX_STANDARD_LIBRARIES})
 else()
-    set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++" ${CMAKE_CXX_STANDARD_LIBRARIES})
+    message(FATAL_ERROR "jemalloc not found! You MUST run ./install_jemalloc.sh in the project root before running CMake.")
 endif()
 
 check_cxx_compiler_flag ("-fopenmp" HAS_OPENMP)
