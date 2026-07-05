@@ -284,6 +284,7 @@ private:
         int blocks = 1 + (bin_size_ >> blockShift);
         static thread_local std::vector<uint64_t> tmp;
         if (tmp.size() < (blocks << blockShift)) tmp.resize(blocks << blockShift);
+        std::fill(tmp.begin(), tmp.begin() + (blocks << blockShift), 0);
         static thread_local std::vector<uint64_t> tmpc;
         if (tmpc.size() < blocks) tmpc.resize(blocks);
         std::fill(tmpc.begin(), tmpc.begin() + blocks, 0);
@@ -342,6 +343,7 @@ private:
         int blocks = 1 + (bin_size_ >> blockShift);
         static thread_local std::vector<uint64_t> tmp;
         if (tmp.size() < (blocks << blockShift)) tmp.resize(blocks << blockShift);
+        std::fill(tmp.begin(), tmp.begin() + (blocks << blockShift), 0);
         static thread_local std::vector<uint64_t> tmpc;
         if (tmpc.size() < blocks) tmpc.resize(blocks);
         std::fill(tmpc.begin(), tmpc.begin() + blocks, 0);
