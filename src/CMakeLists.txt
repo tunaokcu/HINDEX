@@ -11,7 +11,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_SHARED_LIBS "Build using static libraries" OFF)
 
-set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++ /home/okcut/FUSOR-hibff/jemalloc_install/lib/libjemalloc.so" ${CMAKE_CXX_STANDARD_LIBRARIES})
+set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++" ${CMAKE_CXX_STANDARD_LIBRARIES})
+
+find_library(JEMALLOC_LIB jemalloc)
+if (JEMALLOC_LIB)
+    message(STATUS "Found jemalloc: ${JEMALLOC_LIB}")
+    set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} ${JEMALLOC_LIB}")
+else()
+    message(STATUS "jemalloc not found, using standard allocator (install libjemalloc-dev for better parallel performance)")
+endif()
 
 check_cxx_compiler_flag ("-fopenmp" HAS_OPENMP)
 if (HAS_OPENMP)
