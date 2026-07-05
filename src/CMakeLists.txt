@@ -11,14 +11,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(BUILD_SHARED_LIBS "Build using static libraries" OFF)
 
-set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++" ${CMAKE_CXX_STANDARD_LIBRARIES})
-
-find_library(JEMALLOC_LIB jemalloc)
+find_library(JEMALLOC_LIB jemalloc HINTS ${CMAKE_CURRENT_SOURCE_DIR}/../jemalloc_install/lib)
 if (JEMALLOC_LIB)
-    message(STATUS "Found jemalloc: ${JEMALLOC_LIB}")
-    set(CMAKE_CXX_STANDARD_LIBRARIES "${CMAKE_CXX_STANDARD_LIBRARIES} ${JEMALLOC_LIB}")
+    set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++ ${JEMALLOC_LIB}" ${CMAKE_CXX_STANDARD_LIBRARIES})
 else()
-    message(STATUS "jemalloc not found, using standard allocator (install libjemalloc-dev for better parallel performance)")
+    set(CMAKE_CXX_STANDARD_LIBRARIES "-static-libgcc -static-libstdc++" ${CMAKE_CXX_STANDARD_LIBRARIES})
 endif()
 
 check_cxx_compiler_flag ("-fopenmp" HAS_OPENMP)
