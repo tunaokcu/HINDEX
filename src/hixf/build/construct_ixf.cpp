@@ -121,15 +121,24 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vec
         std::atomic<bool> any_failed{false};
 
         #pragma omp parallel for num_threads(actual_threads) schedule(dynamic)
-        for (size_t bin_idx = 0; bin_idx < num_bins; ++bin_idx)
+        for (size_t batch = 0; batch < num_batches; ++batch)
         {
             if (any_failed.load(std::memory_order_relaxed)) continue;
-            if (tmp[bin_idx].empty()) continue;
 
-            bool ok = std::visit([&](auto& f) { return f.add_bin_elements(bin_idx, tmp[bin_idx]); }, ixf);
-            if (!ok)
+            size_t bin_start = batch * BINS_PER_WORD;
+            size_t bin_end = std::min(bin_start + BINS_PER_WORD, num_bins);
+
+            for (size_t bin_idx = bin_start; bin_idx < bin_end; ++bin_idx)
             {
-                any_failed.store(true, std::memory_order_relaxed);
+                if (any_failed.load(std::memory_order_relaxed)) break;
+                if (tmp[bin_idx].empty()) continue;
+
+                bool ok = std::visit([&](auto& f) { return f.add_bin_elements(bin_idx, tmp[bin_idx]); }, ixf);
+                if (!ok)
+                {
+                    any_failed.store(true, std::memory_order_relaxed);
+                    break;
+                }
             }
         }
 
@@ -279,27 +288,26 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
             std::atomic<bool> any_failed{false};
             size_t local_failed_bin_id = 0;
 
-            std::vector<bin_entry*> flat_chunk;
-            for (auto& batch_bins : loaded_chunk) {
-                for (auto& entry : batch_bins) {
-                    flat_chunk.push_back(&entry);
-                }
-            }
-
-            size_t actual_threads = std::min(static_cast<size_t>(threads), flat_chunk.size());
+            size_t actual_threads = std::min(static_cast<size_t>(threads), loaded_chunk.size());
 
             #pragma omp parallel for num_threads(actual_threads) schedule(dynamic)
-            for (size_t i = 0; i < flat_chunk.size(); ++i)
+            for (size_t b = 0; b < loaded_chunk.size(); ++b)
             {
                 if (any_failed.load(std::memory_order_relaxed)) continue;
 
-                auto* entry = flat_chunk[i];
-                bool ok = std::visit([&](auto& f) { return f.add_bin_elements(entry->bin_idx, entry->hashes); }, ixf);
-                
-                if (!ok)
+                // Process the 8 bins within this batch sequentially to prevent data races in sdsl::int_vector
+                for (auto& entry : loaded_chunk[b])
                 {
-                    any_failed.store(true, std::memory_order_relaxed);
-                    local_failed_bin_id = entry->bin_idx;
+                    if (any_failed.load(std::memory_order_relaxed)) break;
+
+                    bool ok = std::visit([&](auto& f) { return f.add_bin_elements(entry.bin_idx, entry.hashes); }, ixf);
+                    
+                    if (!ok)
+                    {
+                        any_failed.store(true, std::memory_order_relaxed);
+                        local_failed_bin_id = entry.bin_idx;
+                        break;
+                    }
                 }
             }
 
