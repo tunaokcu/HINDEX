@@ -29,6 +29,16 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
                                                uint8_t bff_arity = 3,
                                                uint8_t threads = 1);
 
+hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass(build_data & data, 
+                                               lemon::ListDigraph::Node const & current_node,
+                                               std::vector<int64_t> & ixf_positions,
+                                               bool is_second,
+                                               size_t const & current_node_ixf_position,
+                                               uint32_t max_stash = 1,
+                                               bool use_xor = false,
+                                               uint8_t bff_arity = 3,
+                                               uint8_t threads = 1);
+
 hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vector<ankerl::unordered_dense::set<size_t>> &node_hashes, bool use_xor = false, uint8_t bff_arity = 3, uint32_t max_stash = 1, uint8_t threads = 1);
 
 

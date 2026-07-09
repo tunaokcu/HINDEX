@@ -125,7 +125,9 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
     if (is_root || is_second)
     {
         
-        auto && ixf = construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads);
+        auto && ixf = arguments.two_pass 
+                      ? construct_ixf_two_pass(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads)
+                      : construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads);
 
         
         data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
@@ -166,7 +168,9 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
                 if (hashset.size() > current_node_data.max_bin_hashes)
                     current_node_data.max_bin_hashes = hashset.size();
             }
-            auto && ixf = construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads);
+            auto && ixf = arguments.two_pass 
+                          ? construct_ixf_two_pass(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads)
+                          : construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads);
             data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
             data.hixf.next_ixf_id[ixf_pos] = std::move(ixf_positions);
             data.hixf.user_bins.bin_indices_of_ixf(ixf_pos) = std::move(filename_indices);

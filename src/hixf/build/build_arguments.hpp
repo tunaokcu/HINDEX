@@ -47,6 +47,7 @@ struct build_arguments
     uint32_t max_stash{1u}; // maximum stash size for XOR filter construction
     bool use_xor{false}; // force usage of XOR filter irrespective of bin size
     uint8_t bff_arity{3}; // Binary Fuse Filter arity: 3 or 4
+    bool two_pass{false}; // use two-pass filter construction
 };
 
 }

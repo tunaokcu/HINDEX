@@ -112,6 +112,8 @@ void set_up_subparser_layout(seqan3::argument_parser & parser, taxor::build::con
                       seqan3::option_spec::standard,
                       seqan3::value_list_validator{3, 4});
 
+    parser.add_flag(config.two_pass, '\0', "two-pass", "use two-pass filter construction");
+
     parser.add_flag(config.output_verbose_statistics,
                     '\0', "output-verbose-statistics",
                     "Enable verbose statistics to be printed",
@@ -710,6 +712,7 @@ void build_hixf(taxor::build::configuration const config,
     args.max_stash = config.max_stash;
     args.use_xor = config.use_xor;
     args.bff_arity = config.bff_arity;
+    args.two_pass = config.two_pass;
     if (config.use_syncmer)
         args.t_syncmer = ceil((args.kmer_size - args.syncmer_size + 1) / 2);
 	
