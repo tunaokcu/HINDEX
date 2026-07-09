@@ -50,6 +50,7 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
     // does nothing on lowest level
     loop_over_children(node_hashes, ixf_positions, current_node, data, arguments, is_root, is_second);
 
+    #pragma omp parallel for schedule(dynamic) num_threads(arguments.threads)
     for (size_t i = 0; i < current_node_data.remaining_records.size(); ++i)
     {
         auto const & record = current_node_data.remaining_records[i];
@@ -67,7 +68,11 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
 
             // update maximum bin size if this bin is largest
             if (hashes.size() > current_node_data.max_bin_hashes)
-                current_node_data.max_bin_hashes = hashes.size();
+            {
+                #pragma omp critical
+                if (hashes.size() > current_node_data.max_bin_hashes)
+                    current_node_data.max_bin_hashes = hashes.size();
+            }
             
             hashes.clear();
         }
@@ -93,7 +98,11 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
                     }
                     // update maximum bin size if this split bin is largest
                     if (tmp_hashes.size() > current_node_data.max_bin_hashes)
-                        current_node_data.max_bin_hashes = tmp_hashes.size();
+                    {
+                        #pragma omp critical
+                        if (tmp_hashes.size() > current_node_data.max_bin_hashes)
+                            current_node_data.max_bin_hashes = tmp_hashes.size();
+                    }
 
                     create_temp_hash_file(ixf_pos, bin_idx ,tmp_hashes);
                 }
@@ -116,7 +125,7 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
     if (is_root || is_second)
     {
         
-        auto && ixf = construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity);
+        auto && ixf = construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads);
 
         
         data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
@@ -157,7 +166,7 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
                 if (hashset.size() > current_node_data.max_bin_hashes)
                     current_node_data.max_bin_hashes = hashset.size();
             }
-            auto && ixf = construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity);
+            auto && ixf = construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads);
             data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
             data.hixf.next_ixf_id[ixf_pos] = std::move(ixf_positions);
             data.hixf.user_bins.bin_indices_of_ixf(ixf_pos) = std::move(filename_indices);
@@ -165,7 +174,7 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
         else
         {
             // insert all hashes of all technical bins into newly created IXF
-            auto && ixf = construct_ixf(node_hashes, arguments.use_xor, arguments.bff_arity, arguments.max_stash);
+            auto && ixf = construct_ixf(node_hashes, arguments.use_xor, arguments.bff_arity, arguments.max_stash, arguments.threads);
             data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
             data.hixf.next_ixf_id[ixf_pos] = std::move(ixf_positions);
             data.hixf.user_bins.bin_indices_of_ixf(ixf_pos) = std::move(filename_indices);

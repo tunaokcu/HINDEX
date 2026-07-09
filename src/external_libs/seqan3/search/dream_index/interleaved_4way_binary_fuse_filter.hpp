@@ -277,13 +277,17 @@ private:
      * \param alone_positions reference to an array of indexes that occure only once
      *  
      */
-    int find_alone_positions(std::vector<size_t>& elements, std::vector<t2val_t>& t2vals, sdsl::int_vector<>& alone_positions)
+    int find_alone_positions(std::vector<size_t>& elements, std::vector<t2val_t>& t2vals, std::vector<uint32_t>& alone_positions)
     {
         std::fill(t2vals.begin(), t2vals.end(), t2val_t{ 0,0 });
         // number of elements / 2^18 => if more than 2^18 elements, we need 2 blocks
         int blocks = 1 + (bin_size_ >> blockShift);
-        sdsl::int_vector<> tmp = sdsl::int_vector(blocks << blockShift, 0, 64);       
-        sdsl::int_vector<> tmpc = sdsl::int_vector(blocks,0);
+        static thread_local std::vector<uint64_t> tmp;
+        if (tmp.size() < (blocks << blockShift)) tmp.resize(blocks << blockShift);
+        std::fill(tmp.begin(), tmp.begin() + (blocks << blockShift), 0);
+        static thread_local std::vector<uint64_t> tmpc;
+        if (tmpc.size() < blocks) tmpc.resize(blocks);
+        std::fill(tmpc.begin(), tmpc.begin() + blocks, 0);
         
         for(size_t k : elements) {
             uint64_t hash = murmur64(k);
@@ -329,16 +333,20 @@ private:
      * \returns the number of keys in the stack
      *  
      */
-    size_t fill_stack(sdsl::int_vector<>& reverse_order, 
-                      sdsl::int_vector<>& reverse_h, 
+    size_t fill_stack(std::vector<uint64_t>& reverse_order, 
+                      std::vector<uint8_t>& reverse_h, 
                       std::vector<t2val_t>& t2vals, 
-                      sdsl::int_vector<>& alone_positions,
+                      std::vector<uint32_t>& alone_positions,
                       size_t size, 
                       int alone_pos)
     {
         int blocks = 1 + (bin_size_ >> blockShift);
-        sdsl::int_vector<> tmp = sdsl::int_vector(blocks << blockShift, 0, 64);
-        sdsl::int_vector<> tmpc = sdsl::int_vector(blocks, 0);
+        static thread_local std::vector<uint64_t> tmp;
+        if (tmp.size() < (blocks << blockShift)) tmp.resize(blocks << blockShift);
+        std::fill(tmp.begin(), tmp.begin() + (blocks << blockShift), 0);
+        static thread_local std::vector<uint64_t> tmpc;
+        if (tmpc.size() < blocks) tmpc.resize(blocks);
+        std::fill(tmpc.begin(), tmpc.begin() + blocks, 0);
         size_t reverse_order_pos = 0;
         int best_block = 0;
        
@@ -435,10 +443,10 @@ private:
      * 
      *  
      */
-    void fill_filter(sdsl::int_vector<>& reverse_order, sdsl::int_vector<>& reverse_h, uint bin)
+    void fill_filter(std::vector<uint64_t>& reverse_order, std::vector<uint8_t>& reverse_h, uint bin, size_t stacksize)
     {
         
-        for (int i = reverse_order.size() - 1; i >= 0; i--) 
+        for (int i = stacksize - 1; i >= 0; i--) 
         {
             // the hash of the key we insert next
             uint64_t hash = reverse_order[i];
@@ -480,9 +488,9 @@ private:
         //std::cerr << "add_elements called with " << elements.size() << " bins" << std::flush;
         // stack sigma
         // order in which elements will be inserted into their corresponding bins
-        std::vector<sdsl::int_vector<>> reverse_orders;
+        std::vector<std::vector<uint64_t>> reverse_orders;
         // order in which hash seeds are used for element insertion
-        std::vector<sdsl::int_vector<>> reverse_hs;
+        std::vector<std::vector<uint8_t>> reverse_hs;
         size_t reverse_order_pos;
         // repeat until all xor filters can be build with same seed
         uint32_t iteration = 0;
@@ -504,11 +512,11 @@ private:
                 //    continue;
 
                 std::vector<t2val_t> t2vals_vec(bin_size_);
-                sdsl::int_vector<> alone_positions = sdsl::int_vector(bin_size_);
+                std::vector<uint32_t> alone_positions(bin_size_, 0);
                 int alone_position_nr = find_alone_positions(vec, t2vals_vec, alone_positions);
                
-                sdsl::int_vector<> rev_order_i = sdsl::int_vector(vec.size(),0,64);
-                sdsl::int_vector<> reverse_hi = sdsl::int_vector(vec.size(),0,8);
+                std::vector<uint64_t> rev_order_i(vec.size(), 0);
+                std::vector<uint8_t> reverse_hi(vec.size(), 0);
                 reverse_order_pos = fill_stack(std::ref(rev_order_i), std::ref(reverse_hi), t2vals_vec, alone_positions, vec.size(), alone_position_nr);
                 reverse_orders.emplace_back(std::move(rev_order_i));
                 reverse_hs.emplace_back(std::move(reverse_hi));
@@ -529,7 +537,7 @@ private:
         {
             //if (elements[i].size() == 0)
             //    continue;
-            fill_filter(reverse_orders[i], reverse_hs[i], i);
+            fill_filter(reverse_orders[i], reverse_hs[i], i, reverse_orders[i].size());
         }
         
     }
@@ -799,12 +807,22 @@ public:
             // Clear stash for this bin
             bin_stashes[bin].clear();
             
-            // Allocate auxiliary arrays
-            std::vector<t2val_t> t2vals_vec(bin_size_);
-            sdsl::int_vector<> alone_positions = sdsl::int_vector(bin_size_);
-            sdsl::int_vector<> rev_order = sdsl::int_vector(size, 0, 64);
-            sdsl::int_vector<> reverse_h = sdsl::int_vector(size, 0, 8);
-            std::vector<uint8_t> key_status(size, 0); // 0 = not processed, 1 = processed/stashed
+            // Allocate auxiliary arrays with static thread_local to prevent massive mmap_sem contention
+            static thread_local std::vector<t2val_t> t2vals_vec;
+            if (t2vals_vec.size() < bin_size_) t2vals_vec.resize(bin_size_);
+            
+            static thread_local std::vector<uint32_t> alone_positions;
+            if (alone_positions.size() < bin_size_) alone_positions.resize(bin_size_);
+            
+            static thread_local std::vector<uint64_t> rev_order;
+            if (rev_order.size() < size) rev_order.resize(size);
+            
+            static thread_local std::vector<uint8_t> reverse_h;
+            if (reverse_h.size() < size) reverse_h.resize(size);
+            
+            static thread_local std::vector<uint8_t> key_status;
+            if (key_status.size() < size) key_status.resize(size);
+            std::fill(key_status.begin(), key_status.begin() + size, 0);
             
             // Find initial alone positions
             int alone_position_nr = find_alone_positions(elements, t2vals_vec, alone_positions);
@@ -954,11 +972,8 @@ public:
             }
             
             // Resize to actual stacksize so fill_filter doesn't process trailing zeros
-            rev_order.resize(stacksize);
-            reverse_h.resize(stacksize);
-
-            // Fill filter with successfully peeled elements
-            fill_filter(rev_order, reverse_h, bin);
+            // Actually, we pass stacksize now!
+            fill_filter(rev_order, reverse_h, bin, stacksize);
             
             // Print statistics for builds that use stash
             if (!bin_stashes[bin].empty()) {

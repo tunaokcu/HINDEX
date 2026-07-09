@@ -75,7 +75,7 @@ void loop_over_children(std::vector<ankerl::unordered_dense::set<size_t>> & pare
     {
         // Shuffle indices: More likely to not block each other. Optimal: Interleave
         std::shuffle(indices.begin(), indices.end(), std::mt19937_64{std::random_device{}()});
-        number_of_threads = arguments.threads;
+        number_of_threads = 1u;
     }
     else
     {

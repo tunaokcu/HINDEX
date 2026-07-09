@@ -27,6 +27,9 @@
 #include <chopper/layout/output.hpp>
 
 #include <build/create_ixfs_from_chopper_pack.hpp>
+#include <thread>
+#include <chrono>
+
 #include <build/build_data.hpp>
 #include <build/strong_types.hpp>
 #include <build/build_arguments.hpp>
@@ -671,10 +674,14 @@ void create_layout(taxor::build::configuration const taxor_config,
     data.header_buffer = &header_buffer;
 
     size_t max_hixf_id;
+    auto start_layout = std::chrono::high_resolution_clock::now();
     if (taxor_config.optimize_memory)
         max_hixf_id = determine_best_number_of_technical_bins_memory_optimal(data, layout_config);
     else
         max_hixf_id = determine_best_number_of_technical_bins(data, layout_config);
+    auto end_layout = std::chrono::high_resolution_clock::now();
+    auto duration_layout = std::chrono::duration_cast<std::chrono::milliseconds>(end_layout - start_layout);
+    std::cout << "[TIMER] Layout optimization took: " << duration_layout.count() << " ms" << std::endl;
     
     std::cout << "write Layout header" << std::endl << std::flush;
 
