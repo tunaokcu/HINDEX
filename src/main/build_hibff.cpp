@@ -12,6 +12,8 @@ int main(int argc, char** argv) {
     bool fast_layout = true;
     std::string output_file = "index.hixf";
     bool optimize_memory = false;
+    bool two_pass = false;
+    int max_stash = 1;
 
     // Parse arguments matching the original hibff-index build_hibff interface
     for (int i = 1; i < argc; ++i) {
@@ -28,6 +30,10 @@ int main(int argc, char** argv) {
             interleaved = true;
         } else if (arg == "--optimize-memory") {
             optimize_memory = true;
+        } else if (arg == "--two-pass") {
+            two_pass = true;
+        } else if (arg == "--max-stash") {
+            if (i + 1 < argc) max_stash = std::stoi(argv[++i]);
         } else if (arg == "--fast-layout") {
             if (i + 1 < argc) {
                 std::string val = argv[++i];
@@ -107,6 +113,14 @@ int main(int argc, char** argv) {
 
     if (optimize_memory) {
         cmd += " --optimize-memory";
+    }
+
+    if (two_pass) {
+        cmd += " --two-pass";
+    }
+
+    if (max_stash >= 0) {
+        cmd += " --max-stash " + std::to_string(max_stash);
     }
 
     std::cout << "Wrapper generated TSV and is now running FUSOR:\n" << cmd << std::endl;
