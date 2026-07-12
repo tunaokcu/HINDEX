@@ -791,6 +791,14 @@ public:
     bool add_bin_elements(size_t bin, std::vector<size_t>& elements)
     {
         // Binary fuse filter construction with victim selection and stash support
+        
+        // Key-level deduplication: sort and remove duplicate keys before graph construction.
+        // Duplicate keys produce identical hashes that XOR to 0 at all positions,
+        // making them impossible to peel and forcing unnecessary stashing.
+        std::sort(elements.begin(), elements.end());
+        auto last_unique = std::unique(elements.begin(), elements.end());
+        elements.erase(last_unique, elements.end());
+        
         size_t size = elements.size();
         //std::cerr << "Starting add_bin_elements for bin " << bin << " with " << size << " elements" << std::flush;
         if (size == 0) return true;
@@ -826,6 +834,42 @@ public:
             
             // Find initial alone positions
             int alone_position_nr = find_alone_positions(elements, t2vals_vec, alone_positions);
+            
+            // Graph-level duplicate detection using XOR-cancellation.
+            // After graph construction, if two identical hashes mapped to the same positions,
+            // they XOR to 0. We detect this by checking: if at any of the 4 positions the
+            // t2 hash is 0 and the count is exactly 2, those two entries are duplicates.
+            // We remove the duplicate from the graph and track it separately.
+            uint32_t duplicates = 0;
+            for (size_t ki = 0; ki < size; ki++) {
+                uint64_t hash = murmur64(elements[ki]);
+                std::array<size_t, 4> h_arr = get_hashes(hash);
+                uint32_t h0 = h_arr[0], h1 = h_arr[1], h2 = h_arr[2], h3 = h_arr[3];
+                
+                // Check if all 4 positions have t2 XOR'd to 0 (possible duplicate pair)
+                if ((t2vals_vec[h0].t2 & t2vals_vec[h1].t2 & t2vals_vec[h2].t2 & t2vals_vec[h3].t2) == 0) {
+                    if ((t2vals_vec[h0].t2 == 0 && t2vals_vec[h0].t2count == 2)
+                     || (t2vals_vec[h1].t2 == 0 && t2vals_vec[h1].t2count == 2)
+                     || (t2vals_vec[h2].t2 == 0 && t2vals_vec[h2].t2count == 2)
+                     || (t2vals_vec[h3].t2 == 0 && t2vals_vec[h3].t2count == 2)) {
+                        // This is a hash-level duplicate — remove from graph
+                        key_status[ki] = 1;
+                        duplicates++;
+                        t2vals_vec[h0].t2count--;
+                        t2vals_vec[h0].t2 ^= hash;
+                        if (t2vals_vec[h0].t2count == 1) alone_positions[alone_position_nr++] = h0;
+                        t2vals_vec[h1].t2count--;
+                        t2vals_vec[h1].t2 ^= hash;
+                        if (t2vals_vec[h1].t2count == 1) alone_positions[alone_position_nr++] = h1;
+                        t2vals_vec[h2].t2count--;
+                        t2vals_vec[h2].t2 ^= hash;
+                        if (t2vals_vec[h2].t2count == 1) alone_positions[alone_position_nr++] = h2;
+                        t2vals_vec[h3].t2count--;
+                        t2vals_vec[h3].t2 ^= hash;
+                        if (t2vals_vec[h3].t2count == 1) alone_positions[alone_position_nr++] = h3;
+                    }
+                }
+            }
             
             // Try to fill stack with peeling + victim selection
             size_t stacksize = 0;
@@ -879,7 +923,7 @@ public:
                 }
             
                 // Check if done
-                if (stacksize + stash_count == size) {
+                if (stacksize + duplicates + stash_count == size) {
                     break; // Success!
                 }
             
@@ -942,14 +986,14 @@ public:
                     break; // Exit while(true) to retry with new seed
                 }
                 
-                if (!found_victim && (stacksize + stash_count != size)) {
+                if (!found_victim && (stacksize + duplicates + stash_count != size)) {
                     std::cerr << " [construction incomplete, retrying]" << std::flush;
                     construction_failed = true;
                     break; // Exit while(true) to retry with new seed
                 }
             
                 // If we found a victim and we are not done yet, continue the loop back to peeling
-                if (found_victim && (stacksize + stash_count < size)) {
+                if (found_victim && (stacksize + duplicates + stash_count < size)) {
                     continue;
                 }
                 
