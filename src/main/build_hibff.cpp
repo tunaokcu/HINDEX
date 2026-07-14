@@ -14,6 +14,7 @@ int main(int argc, char** argv) {
     bool optimize_memory = false;
     bool two_pass = false;
     int max_stash = 1;
+    bool crypto = false;
 
     // Parse arguments matching the original hibff-index build_hibff interface
     for (int i = 1; i < argc; ++i) {
@@ -42,6 +43,8 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "-m" || arg == "--memory") {
             if (i + 1 < argc) ++i; // Safely ignored, handled natively by FUSOR disk streaming
+        } else if (arg == "--crypto") {
+            crypto = true;
         }
     }
 
@@ -121,6 +124,10 @@ int main(int argc, char** argv) {
 
     if (max_stash >= 0) {
         cmd += " --max-stash " + std::to_string(max_stash);
+    }
+
+    if (crypto) {
+        cmd += " --crypto";
     }
 
     std::cout << "Wrapper generated TSV and is now running FUSOR:\n" << cmd << std::endl;
