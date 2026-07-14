@@ -1067,8 +1067,8 @@ public:
             // Print statistics for builds that use stash
             if (!bin_stashes[bin].empty()) {
                 std::cerr << "Bin " << bin << " stash build stats: "
-                        << "Filter built for: " << max_bin_elements << " elements, "
-                        << "Hashes inserted: " << size << ", "
+                        << "max_cardinality (max_bin_elements): " << max_bin_elements << ", "
+                        << "Hashes inserted (this bin): " << size << ", "
                         << "Hashes in filter: " << stacksize << ", "
                         << "Hashes in stash: " << bin_stashes[bin].size() << std::endl;
             }
