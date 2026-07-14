@@ -9,6 +9,7 @@ LD_LIBRARY_PATH=/home/okcut/FUSOR-hibff/jemalloc_install/lib /home/okcut/FUSOR-h
     --threads 4 \
     --kmer-size 22 \
     --bff-arity 4 \
+    --crypto
 
 echo "Done building. Running verify_fusor..."
 LD_LIBRARY_PATH=/home/okcut/FUSOR-hibff/jemalloc_install/lib /home/okcut/FUSOR-hibff/build/main/verify_fusor /home/okcut/FUSOR-hibff/fusor_hibff.hixf /home/okcut/hibff-index/binning.out > /home/okcut/FUSOR-hibff/verify_out.txt

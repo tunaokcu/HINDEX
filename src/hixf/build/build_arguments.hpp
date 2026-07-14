@@ -48,6 +48,7 @@ struct build_arguments
     bool use_xor{false}; // force usage of XOR filter irrespective of bin size
     uint8_t bff_arity{3}; // Binary Fuse Filter arity: 3 or 4
     bool two_pass{false}; // use two-pass filter construction
+    bool use_crypto_hash{false}; // use cryptographic hash (SipHash) for perfect decorrelation
 };
 
 }

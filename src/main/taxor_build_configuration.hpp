@@ -31,6 +31,7 @@ struct configuration
     std::string level{"species"}; // default taxonomy level
     uint8_t bff_arity{3}; // Binary Fuse Filter arity: 3 or 4
     bool two_pass{false}; // Use two-pass filter construction
+    bool use_crypto_hash{false}; // Use cryptographic hash
 };
 
 } // namespace taxor::build

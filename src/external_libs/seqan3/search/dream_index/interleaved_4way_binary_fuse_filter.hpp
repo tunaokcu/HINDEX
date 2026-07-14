@@ -122,15 +122,60 @@ private:
     std::vector<std::vector<uint64_t>> bin_stashes{};
     //!\brief Maximum number of elements allowed in stash per bin
     uint32_t max_stash{1};
+    
+    public:
+    //!\brief Use cryptographic hash instead of Murmur64
+    bool use_crypto_hash{false};
+
+    private:
+    static inline uint64_t rotl(uint64_t x, int b) {
+        return (x << b) | (x >> (64 - b));
+    }
+
+    inline uint64_t siphash_64(uint64_t m, uint64_t k0, uint64_t k1) const {
+        uint64_t v0 = k0 ^ 0x736f6d6570736575ULL;
+        uint64_t v1 = k1 ^ 0x646f72616e646f6dULL;
+        uint64_t v2 = k0 ^ 0x6c7967656e657261ULL;
+        uint64_t v3 = k1 ^ 0x7465646279746573ULL;
+        uint64_t b = (8ULL << 56);
+        
+        v3 ^= m;
+        for (int i=0; i<2; ++i) {
+            v0 += v1; v1 = rotl(v1, 13); v1 ^= v0; v0 = rotl(v0, 32);
+            v2 += v3; v3 = rotl(v3, 16); v3 ^= v2;
+            v0 += v3; v3 = rotl(v3, 21); v3 ^= v0;
+            v2 += v1; v1 = rotl(v1, 17); v1 ^= v2; v2 = rotl(v2, 32);
+        }
+        v0 ^= m;
+        
+        v3 ^= b;
+        for (int i=0; i<2; ++i) {
+            v0 += v1; v1 = rotl(v1, 13); v1 ^= v0; v0 = rotl(v0, 32);
+            v2 += v3; v3 = rotl(v3, 16); v3 ^= v2;
+            v0 += v3; v3 = rotl(v3, 21); v3 ^= v0;
+            v2 += v1; v1 = rotl(v1, 17); v1 ^= v2; v2 = rotl(v2, 32);
+        }
+        v0 ^= b;
+        
+        v2 ^= 0xff;
+        for (int i=0; i<4; ++i) {
+            v0 += v1; v1 = rotl(v1, 13); v1 ^= v0; v0 = rotl(v0, 32);
+            v2 += v3; v3 = rotl(v3, 16); v3 ^= v2;
+            v0 += v3; v3 = rotl(v3, 21); v3 ^= v0;
+            v2 += v1; v1 = rotl(v1, 17); v1 ^= v2; v2 = rotl(v2, 32);
+        }
+        return v0 ^ v1 ^ v2 ^ v3;
+    }
 
     /*!\brief Utilizes hashing of a 64-bit key.
-
      * \param   64-bit key to hash
      * \returns a 64-bit hash value for the given key
-     * 
      */
-    inline constexpr uint64_t murmur64(uint64_t h) const
+    inline uint64_t murmur64(uint64_t h) const
     {
+        if (use_crypto_hash) {
+            return siphash_64(h, seed, 0x1234567890abcdefULL);
+        }
         h += seed;
         h ^= h >> 33;
         h *= UINT64_C(0xff51afd7ed558ccd);
@@ -1214,6 +1259,7 @@ public:
         archive(seed);
         archive(data);
         archive(bin_stashes);
+        archive(use_crypto_hash);
     }
     //!\endcond
 };

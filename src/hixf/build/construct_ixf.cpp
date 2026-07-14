@@ -44,7 +44,7 @@ Overload 1: construct from in-memory node_hashes
 Used for lower-level IXFs (not root/second).
 Uses sized constructor + parallel word-aligned batch add_bin_elements.
 */
-hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vector<ankerl::unordered_dense::set<size_t>> &node_hashes, bool use_xor, uint8_t bff_arity, uint32_t max_stash, uint8_t threads)
+hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vector<ankerl::unordered_dense::set<size_t>> &node_hashes, bool use_xor, uint8_t bff_arity, uint32_t max_stash, uint8_t threads, bool use_crypto_hash)
 {
     size_t num_bins = node_hashes.size();
 
@@ -70,10 +70,13 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vec
         try {
             if (max_bin_size < floor_threshold || use_xor)
                 ixf = seqan3::interleaved_xor_filter<>{tmp, max_stash};
-            else if (bff_arity == 4)
-                ixf = seqan3::interleaved_4way_binary_fuse_filter<>{tmp, max_stash};
-            else
+            else if (bff_arity == 4) {
+                auto filter = seqan3::interleaved_4way_binary_fuse_filter<>{tmp, max_stash};
+                filter.use_crypto_hash = use_crypto_hash;
+                ixf = std::move(filter);
+            } else {
                 ixf = seqan3::interleaved_3way_binary_fuse_filter<>{tmp, max_stash};
+            }
         } catch (std::exception const& e) {
             std::cerr << "Exception in construct_ixf(node_hashes): " << e.what() << std::endl;
             throw;
@@ -97,6 +100,7 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vec
             if (bff_arity == 4) {
                 auto filter = seqan3::interleaved_4way_binary_fuse_filter<>{num_bins, max_bin_size};
                 filter.set_max_stash(max_stash);
+                filter.use_crypto_hash = use_crypto_hash;
                 return filter;
             } else {
                 auto filter = seqan3::interleaved_3way_binary_fuse_filter<>{num_bins, max_bin_size};
@@ -178,7 +182,8 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
                                                uint32_t max_stash,
                                                bool use_xor,
                                                uint8_t bff_arity,
-                                               uint8_t threads)
+                                               uint8_t threads,
+                                               bool use_crypto_hash)
 {
     auto &current_node_data = data.node_map[current_node];
 
@@ -199,6 +204,7 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
             if (bff_arity == 4) {
                 auto filter = seqan3::interleaved_4way_binary_fuse_filter<>{current_node_data.number_of_technical_bins, max_bin_size};
                 filter.set_max_stash(max_stash);
+                filter.use_crypto_hash = use_crypto_hash;
                 return filter;
             } else {
                 auto filter = seqan3::interleaved_3way_binary_fuse_filter<>{current_node_data.number_of_technical_bins, max_bin_size};
@@ -392,7 +398,8 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass
                                                uint32_t max_stash,
                                                bool use_xor,
                                                uint8_t bff_arity,
-                                               uint8_t threads)
+                                               uint8_t threads,
+                                               bool use_crypto_hash)
 {
     auto &current_node_data = data.node_map[current_node];
 
@@ -448,6 +455,7 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass
             if (bff_arity == 4) {
                 auto filter = seqan3::interleaved_4way_binary_fuse_filter<>{current_node_data.number_of_technical_bins, max_bin_size};
                 filter.set_max_stash(max_stash);
+                filter.use_crypto_hash = use_crypto_hash;
                 return filter;
             } else {
                 auto filter = seqan3::interleaved_3way_binary_fuse_filter<>{current_node_data.number_of_technical_bins, max_bin_size};
