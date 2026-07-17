@@ -18,7 +18,8 @@ struct configuration
     int window_size{20u};
     int syncmer_size{10u};
     int scaling{1u};
-    int max_stash{1u}; // maximum stash size for XOR filter construction
+    int largest_max_stash{1u}; // maximum stash size for the largest XOR filter construction
+    int regular_max_stash{1u}; // maximum stash size for regular XOR filter construction
     bool output_verbose_statistics{false};
     bool debug{false};
     bool use_syncmer{false};

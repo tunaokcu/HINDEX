@@ -24,7 +24,8 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(build_da
                                                std::vector<int64_t> & ixf_positions,
                                                bool is_second,
                                                size_t const & current_node_ixf_position,
-                                               uint32_t max_stash = 1,
+                                               uint32_t largest_max_stash = 1,
+                                               uint32_t regular_max_stash = 1,
                                                bool use_xor = false,
                                                uint8_t bff_arity = 3,
                                                uint8_t threads = 1,
@@ -35,13 +36,14 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass
                                                std::vector<int64_t> & ixf_positions,
                                                bool is_second,
                                                size_t const & current_node_ixf_position,
-                                               uint32_t max_stash = 1,
+                                               uint32_t largest_max_stash = 1,
+                                               uint32_t regular_max_stash = 1,
                                                bool use_xor = false,
                                                uint8_t bff_arity = 3,
                                                uint8_t threads = 1,
                                                bool use_crypto_hash = false);
 
-hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vector<ankerl::unordered_dense::set<size_t>> &node_hashes, bool use_xor = false, uint8_t bff_arity = 3, uint32_t max_stash = 1, uint8_t threads = 1, bool use_crypto_hash = false);
+hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf(std::vector<ankerl::unordered_dense::set<size_t>> &node_hashes, bool use_xor = false, uint8_t bff_arity = 3, uint32_t largest_max_stash = 1, uint32_t regular_max_stash = 1, uint8_t threads = 1, bool use_crypto_hash = false);
 
 
 } // namespace raptor::hibf

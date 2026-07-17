@@ -126,8 +126,8 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
     {
         
         auto && ixf = arguments.two_pass 
-                      ? construct_ixf_two_pass(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash)
-                      : construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash);
+                      ? construct_ixf_two_pass(data, current_node, ixf_positions, is_second, ixf_pos, arguments.largest_max_stash, arguments.regular_max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash)
+                      : construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.largest_max_stash, arguments.regular_max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash);
 
         
         data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
@@ -169,8 +169,8 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
                     current_node_data.max_bin_hashes = hashset.size();
             }
             auto && ixf = arguments.two_pass 
-                          ? construct_ixf_two_pass(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash)
-                          : construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash);
+                          ? construct_ixf_two_pass(data, current_node, ixf_positions, is_second, ixf_pos, arguments.largest_max_stash, arguments.regular_max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash)
+                          : construct_ixf(data, current_node, ixf_positions, is_second, ixf_pos, arguments.largest_max_stash, arguments.regular_max_stash, arguments.use_xor, arguments.bff_arity, arguments.threads, arguments.use_crypto_hash);
             data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
             data.hixf.next_ixf_id[ixf_pos] = std::move(ixf_positions);
             data.hixf.user_bins.bin_indices_of_ixf(ixf_pos) = std::move(filename_indices);
@@ -178,7 +178,7 @@ size_t hierarchical_build(ankerl::unordered_dense::set<size_t> &parent_hashes,
         else
         {
             // insert all hashes of all technical bins into newly created IXF
-            auto && ixf = construct_ixf(node_hashes, arguments.use_xor, arguments.bff_arity, arguments.max_stash, arguments.threads, arguments.use_crypto_hash);
+            auto && ixf = construct_ixf(node_hashes, arguments.use_xor, arguments.bff_arity, arguments.largest_max_stash, arguments.regular_max_stash, arguments.threads, arguments.use_crypto_hash);
             data.hixf.ixf_vector[ixf_pos] = std::move(ixf);
             data.hixf.next_ixf_id[ixf_pos] = std::move(ixf_positions);
             data.hixf.user_bins.bin_indices_of_ixf(ixf_pos) = std::move(filename_indices);

@@ -13,7 +13,8 @@ int main(int argc, char** argv) {
     std::string output_file = "index.hixf";
     bool optimize_memory = false;
     bool two_pass = false;
-    int max_stash = 1;
+    int largest_max_stash = 1;
+    int regular_max_stash = 1;
     bool crypto = false;
 
     // Parse arguments matching the original hibff-index build_hibff interface
@@ -33,8 +34,10 @@ int main(int argc, char** argv) {
             optimize_memory = true;
         } else if (arg == "--two-pass") {
             two_pass = true;
-        } else if (arg == "--max-stash") {
-            if (i + 1 < argc) max_stash = std::stoi(argv[++i]);
+        } else if (arg == "--largest-max-stash") {
+            if (i + 1 < argc) largest_max_stash = std::stoi(argv[++i]);
+        } else if (arg == "--regular-max-stash") {
+            if (i + 1 < argc) regular_max_stash = std::stoi(argv[++i]);
         } else if (arg == "--fast-layout") {
             if (i + 1 < argc) {
                 std::string val = argv[++i];
@@ -122,8 +125,11 @@ int main(int argc, char** argv) {
         cmd += " --two-pass";
     }
 
-    if (max_stash >= 0) {
-        cmd += " --max-stash " + std::to_string(max_stash);
+    if (largest_max_stash >= 0) {
+        cmd += " --largest-max-stash " + std::to_string(largest_max_stash);
+    }
+    if (regular_max_stash >= 0) {
+        cmd += " --regular-max-stash " + std::to_string(regular_max_stash);
     }
 
     if (crypto) {

@@ -120,8 +120,10 @@ private:
     size_t bins_per_batch{};
     //!\brief Stash for each bin to handle difficult-to-place elements (binary fuse filter feature)
     std::vector<std::vector<uint64_t>> bin_stashes{};
-    //!\brief Maximum number of elements allowed in stash per bin
-    uint32_t max_stash{1};
+    //!\brief Maximum number of elements allowed in stash per bin for the largest filter
+    uint32_t largest_max_stash{1};
+    //!\brief Maximum number of elements allowed in stash per bin for regular filters
+    uint32_t regular_max_stash{1};
 
     /*!\brief Utilizes hashing of a 64-bit key.
 
@@ -569,9 +571,10 @@ public:
      * ### Example
      * 
      */
-    interleaved_3way_binary_fuse_filter(std::vector<std::vector<size_t>>& elements, uint32_t max_stash_ = 1)
+    interleaved_3way_binary_fuse_filter(std::vector<std::vector<size_t>>& elements, uint32_t largest_max_stash_ = 1, uint32_t regular_max_stash_ = 1)
     {
-        max_stash = max_stash_;
+        largest_max_stash = largest_max_stash_;
+        regular_max_stash = regular_max_stash_;
         bins = elements.size();
         int idx = 0;
         for (std::vector<size_t> v : elements)
@@ -617,28 +620,63 @@ public:
         data = sdsl::int_vector<>(bins * bin_size_, 0, ftype);
         bin_stashes.resize(bins);
 
-        bool success = false;
+        size_t largest_bin_idx = 0;
+        size_t largest_bin_size = 0;
+        for (size_t i = 0; i < elements.size(); ++i) {
+            if (elements[i].size() > largest_bin_size) {
+                largest_bin_size = elements[i].size();
+                largest_bin_idx = i;
+            }
+        }
+
         bool has_failed = false;
         
-        while (!success) {
-            success = true;
+        while (true) {
+            // Step 1: Start with the filter with the largest cardinality
+            bool success = add_bin_elements(largest_bin_idx, elements[largest_bin_idx], largest_max_stash);
+
+            if (!success) {
+                has_failed = true;
+                std::cerr << " [Failed on IBFF3, largest bin id: (" << largest_bin_idx << ")] ... " << std::flush;
+                clear();
+                for (auto & stash : bin_stashes) {
+                    stash.clear();
+                }
+                set_seed();
+                continue;
+            }
             
-            // Use add_bin_elements() which supports stash for difficult-to-place hashes
+            // Step 2: Continue, in parallel, with the rest of the filters
+            bool all_success = true;
+            #pragma omp parallel for
             for (size_t bin_idx = 0; bin_idx < elements.size(); ++bin_idx)
             {
-                success = add_bin_elements(bin_idx, elements[bin_idx]);
-
-                if (!success) {
-                    has_failed = true;
-                    std::cerr << " [Failed on IBFF3, bin id: (" << bin_idx << ")] ... " << std::flush;
-                    clear();
-                    for (auto & stash : bin_stashes) {
-                        stash.clear();
+                if (bin_idx == largest_bin_idx) continue;
+                if (!all_success) continue; 
+                
+                bool bin_success = add_bin_elements(bin_idx, elements[bin_idx], regular_max_stash);
+                if (!bin_success) {
+                    #pragma omp critical
+                    {
+                        all_success = false;
                     }
-                    set_seed();
-                    break;
+                } else {
+                    bin_stashes[bin_idx].clear();
                 }
             }
+            
+            if (!all_success) {
+                has_failed = true;
+                std::cerr << " [Failed on IBFF3, regular bins] ... " << std::flush;
+                clear();
+                for (auto & stash : bin_stashes) {
+                    stash.clear();
+                }
+                set_seed();
+                continue;
+            }
+            
+            break;
         }
         if (has_failed) {
             std::cerr << "Success!\n";
@@ -785,7 +823,7 @@ public:
 	 *  }
      * 
      */
-    bool add_bin_elements(size_t bin, std::vector<size_t>& elements)
+    bool add_bin_elements(size_t bin, std::vector<size_t>& elements, uint32_t current_max_stash)
     {
         // Binary fuse filter construction with victim selection and stash support
         
@@ -928,8 +966,8 @@ public:
                         stash_count++;
                         
                         // Check stash limit
-                        if (stash_count > max_stash) {
-                            //std::cerr << " [Bin " << bin << " stash overflow: " << stash_count << " > " << max_stash << "]" << std::flush;
+                        if (stash_count > current_max_stash) {
+                            //std::cerr << " [Bin " << bin << " stash overflow: " << stash_count << " > " << current_max_stash << "]" << std::flush;
                             construction_failed = true;
                             break; // Break inner loop to retry with new seed
                         }
@@ -1060,9 +1098,10 @@ public:
         return seed;
     }
 
-    void set_max_stash(uint32_t value)
+    void set_max_stash(uint32_t largest_value, uint32_t regular_value)
     {
-        max_stash = value;
+        largest_max_stash = largest_value;
+        regular_max_stash = regular_value;
     }
 
     /*!\name Lookup
@@ -1132,9 +1171,9 @@ public:
      */
     friend bool operator==(interleaved_3way_binary_fuse_filter const & lhs, interleaved_3way_binary_fuse_filter const & rhs) noexcept
     {
-        return std::tie(lhs.bins, lhs.bins_per_batch, lhs.bin_size_, lhs.ftype, lhs.bin_words, lhs.segment_length, lhs.segment_count, lhs.segment_count_length, lhs.max_bin_elements, lhs.max_stash, lhs.bin_stashes,
+        return std::tie(lhs.bins, lhs.bins_per_batch, lhs.bin_size_, lhs.ftype, lhs.bin_words, lhs.segment_length, lhs.segment_count, lhs.segment_count_length, lhs.max_bin_elements, lhs.largest_max_stash, lhs.regular_max_stash, lhs.bin_stashes,
                         lhs.seed, lhs.data) ==
-               std::tie(rhs.bins, rhs.bins_per_batch, rhs.bin_size_, rhs.ftype, rhs.bin_words, rhs.segment_length, rhs.segment_count, rhs.segment_count_length, rhs.max_bin_elements, rhs.max_stash, rhs.bin_stashes,
+               std::tie(rhs.bins, rhs.bins_per_batch, rhs.bin_size_, rhs.ftype, rhs.bin_words, rhs.segment_length, rhs.segment_count, rhs.segment_count_length, rhs.max_bin_elements, rhs.largest_max_stash, rhs.regular_max_stash, rhs.bin_stashes,
                         rhs.seed, rhs.data);
     }
 
@@ -1196,7 +1235,8 @@ public:
         archive(segment_count);
         archive(segment_count_length);
         archive(max_bin_elements);
-        archive(max_stash);
+        archive(largest_max_stash);
+        archive(regular_max_stash);
         archive(seed);
         archive(data);
         archive(bin_stashes);

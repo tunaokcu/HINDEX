@@ -91,7 +91,11 @@ void set_up_subparser_layout(seqan3::argument_parser & parser, taxor::build::con
                       seqan3::option_spec::standard,
                       seqan3::arithmetic_range_validator{static_cast<size_t>(10), static_cast<size_t>(1000)});
 
-    parser.add_option(config.max_stash, '\0', "max-stash", "maximum stash size for XOR filter construction (0=no stash, default: 1)",
+    parser.add_option(config.largest_max_stash, '\0', "largest-max-stash", "maximum stash size for the largest XOR filter construction (default: 1)",
+                      seqan3::option_spec::standard,
+                      seqan3::arithmetic_range_validator{static_cast<size_t>(0), static_cast<size_t>(100000)});
+
+    parser.add_option(config.regular_max_stash, '\0', "regular-max-stash", "maximum stash size for regular XOR filter construction (default: 1)",
                       seqan3::option_spec::standard,
                       seqan3::arithmetic_range_validator{static_cast<size_t>(0), static_cast<size_t>(100000)});
 
@@ -710,7 +714,8 @@ void build_hixf(taxor::build::configuration const config,
     args.threads = config.threads;
 	args.compute_syncmer = config.use_syncmer;
     args.scaling = config.scaling;
-    args.max_stash = config.max_stash;
+    args.largest_max_stash = config.largest_max_stash;
+    args.regular_max_stash = config.regular_max_stash;
     args.use_xor = config.use_xor;
     args.bff_arity = config.bff_arity;
     args.two_pass = config.two_pass;

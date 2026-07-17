@@ -116,7 +116,8 @@ private:
     //!\brief number of bins to query in parallel
     size_t bins_per_batch{};
     //!\brief The maximum number of elements that can be stashed per bin.
-    uint32_t max_stash{};
+    uint32_t largest_max_stash{};
+    uint32_t regular_max_stash{};
     //!\brief The stash of elements that caused hash collisions, separated per bin.
     std::vector<std::vector<uint64_t>> bin_stashes{};
     /*!\brief Utilizes hashing of a 64-bit key.
@@ -322,7 +323,8 @@ private:
                       size_t bin,
                       size_t& stash_count,
                       bool& construction_failed,
-                      int alone_pos)
+                      int alone_pos,
+                      uint32_t current_max_stash)
     {
         size_t size = elements.size();
         int blocks = 1 + ((3 * block_length) >> blockShift);
@@ -390,7 +392,7 @@ private:
                             bin_stashes[bin].push_back(key);
                             stash_count++;
                             
-                            if (stash_count > max_stash) {
+                            if (stash_count > current_max_stash) {
                                 construction_failed = true;
                                 break;
                             }
@@ -519,65 +521,97 @@ private:
      */
     void add_elements(std::vector<std::vector<size_t>>& elements)
     {
-        // stack sigma
-        // order in which elements will be inserted into their corresponding bins
-        std::vector<sdsl::int_vector<>> reverse_orders;
-        // order in which hash seeds are used for element insertion
-        std::vector<sdsl::int_vector<>> reverse_hs;
-        size_t reverse_order_pos;
+        std::vector<sdsl::int_vector<>> reverse_orders(elements.size());
+        std::vector<sdsl::int_vector<>> reverse_hs(elements.size());
+        
+        size_t largest_bin_idx = 0;
+        size_t largest_bin_size = 0;
+        for (size_t i = 0; i < elements.size(); ++i) {
+            if (elements[i].size() > largest_bin_size) {
+                largest_bin_size = elements[i].size();
+                largest_bin_idx = i;
+            }
+        }
+        
         bool has_failed = false;
-        // repeat until all xor filters can be build with same seed
         while (true)
         {
-            // sets the same seed for all xor filters
-            int i = 0;
             bool success = true;
-            reverse_hs.clear();
-            reverse_order_pos = 0;
-            reverse_orders.clear();
-            for (std::vector<size_t> vec : elements)
-            {
-                //if (vec.size() == 0)
-                //    continue;
-
-                std::vector<t2val_t> t2vals_vec(bin_size_);
-                sdsl::int_vector<> alone_positions = sdsl::int_vector(bin_size_);
-                int alone_position_nr = find_alone_positions(vec, t2vals_vec, alone_positions);
-               
-                std::vector<uint8_t> key_status(vec.size(), 0);
-                size_t stash_count = 0;
-                bool construction_failed = false;
-                bin_stashes[i].clear();
-               
-                sdsl::int_vector<> rev_order_i = sdsl::int_vector(vec.size(),0,64);
-                sdsl::int_vector<> reverse_hi = sdsl::int_vector(vec.size(),0,8);
-                reverse_order_pos = fill_stack(std::ref(rev_order_i), std::ref(reverse_hi), t2vals_vec, alone_positions, vec, key_status, i, stash_count, construction_failed, alone_position_nr);
-                
-                rev_order_i.resize(reverse_order_pos);
-                reverse_hi.resize(reverse_order_pos);
-                
-                reverse_orders.emplace_back(std::move(rev_order_i));
-                reverse_hs.emplace_back(std::move(reverse_hi));
-                if (construction_failed || reverse_order_pos + stash_count != vec.size())
-                {
-                    has_failed = true;
-                    std::cerr << " [Failed on IXF, bin id: (" << i << ")] ... " << std::flush;
-                    success = false;
-                    set_seed();
-                    break;
-                }
-
-                if (!bin_stashes[i].empty()) {
-                    std::sort(bin_stashes[i].begin(), bin_stashes[i].end());
-                    auto last = std::unique(bin_stashes[i].begin(), bin_stashes[i].end());
-                    bin_stashes[i].erase(last, bin_stashes[i].end());
-                }
-
-                i++;
+            size_t stash_count = 0;
+            bool construction_failed = false;
+            bin_stashes[largest_bin_idx].clear();
+            
+            std::vector<t2val_t> t2vals_vec(bin_size_);
+            sdsl::int_vector<> alone_positions = sdsl::int_vector(bin_size_);
+            int alone_position_nr = find_alone_positions(elements[largest_bin_idx], t2vals_vec, alone_positions);
+            
+            std::vector<uint8_t> key_status(elements[largest_bin_idx].size(), 0);
+            sdsl::int_vector<> rev_order_i = sdsl::int_vector(elements[largest_bin_idx].size(),0,64);
+            sdsl::int_vector<> reverse_hi = sdsl::int_vector(elements[largest_bin_idx].size(),0,8);
+            size_t reverse_order_pos = fill_stack(rev_order_i, reverse_hi, t2vals_vec, alone_positions, elements[largest_bin_idx], key_status, largest_bin_idx, stash_count, construction_failed, alone_position_nr, largest_max_stash);
+            
+            if (construction_failed || reverse_order_pos + stash_count != elements[largest_bin_idx].size()) {
+                has_failed = true;
+                std::cerr << " [Failed on IXF, largest bin id: (" << largest_bin_idx << ")] ... " << std::flush;
+                success = false;
+                set_seed();
+                continue;
             }
-            if (success)
-                break;
+            rev_order_i.resize(reverse_order_pos);
+            reverse_hi.resize(reverse_order_pos);
+            reverse_orders[largest_bin_idx] = std::move(rev_order_i);
+            reverse_hs[largest_bin_idx] = std::move(reverse_hi);
+            
+            bool all_success = true;
+            #pragma omp parallel for
+            for (size_t i = 0; i < elements.size(); ++i)
+            {
+                if (i == largest_bin_idx) continue;
+                if (!all_success) continue;
+                
+                std::vector<t2val_t> local_t2vals_vec(bin_size_);
+                sdsl::int_vector<> local_alone_positions = sdsl::int_vector(bin_size_);
+                int local_alone_position_nr = find_alone_positions(elements[i], local_t2vals_vec, local_alone_positions);
+                
+                std::vector<uint8_t> local_key_status(elements[i].size(), 0);
+                size_t local_stash_count = 0;
+                bool local_construction_failed = false;
+                bin_stashes[i].clear();
+                
+                sdsl::int_vector<> local_rev_order_i = sdsl::int_vector(elements[i].size(),0,64);
+                sdsl::int_vector<> local_reverse_hi = sdsl::int_vector(elements[i].size(),0,8);
+                size_t local_reverse_order_pos = fill_stack(std::ref(local_rev_order_i), std::ref(local_reverse_hi), local_t2vals_vec, local_alone_positions, elements[i], local_key_status, i, local_stash_count, local_construction_failed, local_alone_position_nr, regular_max_stash);
+                
+                if (local_construction_failed || local_reverse_order_pos + local_stash_count != elements[i].size()) {
+                    #pragma omp critical
+                    {
+                        all_success = false;
+                    }
+                    continue;
+                }
+                local_rev_order_i.resize(local_reverse_order_pos);
+                local_reverse_hi.resize(local_reverse_order_pos);
+                reverse_orders[i] = std::move(local_rev_order_i);
+                reverse_hs[i] = std::move(local_reverse_hi);
+                
+                bin_stashes[i].clear();
+            }
+            
+            if (!all_success) {
+                has_failed = true;
+                std::cerr << " [Failed on IXF, regular bins] ... " << std::flush;
+                set_seed();
+                continue;
+            }
+            
+            if (!bin_stashes[largest_bin_idx].empty()) {
+                std::sort(bin_stashes[largest_bin_idx].begin(), bin_stashes[largest_bin_idx].end());
+                auto last = std::unique(bin_stashes[largest_bin_idx].begin(), bin_stashes[largest_bin_idx].end());
+                bin_stashes[largest_bin_idx].erase(last, bin_stashes[largest_bin_idx].end());
+            }
+            break;
         }
+        
         if (has_failed) {
             std::cerr << "Success!\n";
         }
@@ -617,9 +651,10 @@ public:
      * ### Example
      * 
      */
-    interleaved_xor_filter(std::vector<std::vector<size_t>>& elements, uint32_t max_stash = 0)
+    interleaved_xor_filter(std::vector<std::vector<size_t>>& elements, uint32_t largest_max_stash_ = 0, uint32_t regular_max_stash_ = 0)
     {
-        this->max_stash = max_stash;
+        largest_max_stash = largest_max_stash_;
+        regular_max_stash = regular_max_stash_;
         bins = elements.size();
         int idx = 0;
         for (std::vector<size_t> v : elements)
@@ -670,9 +705,10 @@ public:
      * ### Example
      * 
      */
-    interleaved_xor_filter(size_t bins_, size_t max_bin_elements, uint32_t max_stash = 0)
+    interleaved_xor_filter(size_t bins_, size_t max_bin_elements, uint32_t largest_max_stash_ = 0, uint32_t regular_max_stash_ = 0)
     {
-        this->max_stash = max_stash;
+        largest_max_stash = largest_max_stash_;
+        regular_max_stash = regular_max_stash_;
         this->bins = bins_;
         bin_size_ = 32 + 1.23 * max_bin_elements;
         block_length = bin_size_ / 3;
@@ -743,9 +779,15 @@ public:
     /*!\brief Sets the maximum allowed stash size per bin
      * \param max_stash_size The new maximum stash size
      */
-    void set_max_stash(uint32_t max_stash_size)
+    void set_max_stash(uint32_t largest_value, uint32_t regular_value)
     {
-        max_stash = max_stash_size;
+        largest_max_stash = largest_value;
+        regular_max_stash = regular_value;
+    }
+
+    uint32_t get_regular_max_stash() const
+    {
+        return regular_max_stash;
     }
 
     /*!\brief Checks if a given key is present in the stash for a given bin
@@ -801,7 +843,7 @@ public:
 	 *  }
      * 
      */
-    bool add_bin_elements(size_t bin, std::vector<size_t>& elements)
+    bool add_bin_elements(size_t bin, std::vector<size_t>& elements, uint32_t current_max_stash)
     {
        
         size_t reverse_order_pos = 0;
@@ -815,7 +857,7 @@ public:
 
         sdsl::int_vector<> rev_order = sdsl::int_vector(elements.size(),0,64);
         sdsl::int_vector<> reverse_h = sdsl::int_vector(elements.size(),0,8);
-        reverse_order_pos = fill_stack(std::ref(rev_order), std::ref(reverse_h), t2vals_vec, alone_positions, elements, key_status, bin, stash_count, construction_failed, alone_position_nr);
+        reverse_order_pos = fill_stack(rev_order, reverse_h, t2vals_vec, alone_positions, elements, key_status, bin, stash_count, construction_failed, alone_position_nr, current_max_stash);
         
         if (construction_failed || reverse_order_pos + stash_count != elements.size())
         {

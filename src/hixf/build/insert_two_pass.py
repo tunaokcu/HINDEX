@@ -13,7 +13,8 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass
                                                std::vector<int64_t> & ixf_positions,
                                                bool is_second,
                                                size_t const & current_node_ixf_pos,
-                                               uint32_t max_stash,
+                                               uint32_t largest_max_stash,
+                                               uint32_t regular_max_stash,
                                                bool use_xor,
                                                uint8_t bff_arity,
                                                uint8_t threads)
@@ -64,18 +65,18 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass
         if (max_bin_size < floor_threshold || use_xor)
         {
             using_IBFF = false;
-            return seqan3::interleaved_xor_filter<>{current_node_data.number_of_technical_bins, max_bin_size, max_stash};
+            return seqan3::interleaved_xor_filter<>{current_node_data.number_of_technical_bins, max_bin_size, largest_max_stash, regular_max_stash};
         }
         else
         {
             using_IBFF = true;
             if (bff_arity == 4) {
                 auto filter = seqan3::interleaved_4way_binary_fuse_filter<>{current_node_data.number_of_technical_bins, max_bin_size};
-                filter.set_max_stash(max_stash);
+                filter.set_max_stash(largest_max_stash, regular_max_stash);
                 return filter;
             } else {
                 auto filter = seqan3::interleaved_3way_binary_fuse_filter<>{current_node_data.number_of_technical_bins, max_bin_size};
-                filter.set_max_stash(max_stash);
+                filter.set_max_stash(largest_max_stash, regular_max_stash);
                 return filter;
             }
         }
@@ -154,7 +155,10 @@ hixf::hierarchical_interleaved_xor_filter<uint8_t>::ixf_t construct_ixf_two_pass
                 {
                     if (any_failed.load(std::memory_order_relaxed)) break;
 
-                    bool ok = std::visit([&](auto& f) { return f.add_bin_elements(entry.bin_idx, entry.hashes); }, ixf);
+                    bool ok = std::visit([&](auto& f) { 
+                        uint32_t current_max_stash = (entry.hashes.size() == max_bin_size) ? largest_max_stash : regular_max_stash;
+                        return f.add_bin_elements(entry.bin_idx, entry.hashes, current_max_stash); 
+                    }, ixf);
                     
                     if (!ok)
                     {
