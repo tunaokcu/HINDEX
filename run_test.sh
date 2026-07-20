@@ -9,6 +9,8 @@ LD_LIBRARY_PATH=/home/okcut/FUSOR-hibff/jemalloc_install/lib /home/okcut/FUSOR-h
     --threads 4 \
     --kmer-size 22 \
     --bff-arity 4 \
+    --largest-max-stash 100000 \
+    --regular-max-stash 0 \
     --crypto
 
 echo "Done building. Running verify_fusor..."

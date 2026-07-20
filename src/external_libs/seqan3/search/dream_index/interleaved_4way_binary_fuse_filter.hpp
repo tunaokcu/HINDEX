@@ -13,6 +13,7 @@
 #include <seqan3/core/detail/strong_type.hpp>
 
 #include <bitset>
+#include <omp.h>
 
 #include <seqan3/core/concept/cereal.hpp>
 #include <seqan3/core/debug_stream.hpp>
@@ -173,12 +174,12 @@ private:
      * \param   64-bit key to hash
      * \returns a 64-bit hash value for the given key
      */
-    inline uint64_t murmur64(uint64_t h) const
+    inline uint64_t murmur64(uint64_t h, uint64_t seed_val) const
     {
         if (use_crypto_hash) {
-            return siphash_64(h, seed, 0x1234567890abcdefULL);
+            return siphash_64(h, seed_val, 0x1234567890abcdefULL);
         }
-        h += seed;
+        h += seed_val;
         h ^= h >> 33;
         h *= UINT64_C(0xff51afd7ed558ccd);
         h ^= h >> 33;
@@ -186,6 +187,8 @@ private:
         h ^= h >> 33;
         return h;
     }
+
+    inline uint64_t murmur64(uint64_t h) const { return murmur64(h, this->seed); }
 
 #ifdef __SIZEOF_INT128__
     static inline constexpr uint64_t binary_fuse_mulhi(uint64_t a, uint64_t b) {
@@ -279,7 +282,7 @@ private:
      * \param t2vals data structure to store counts for each index
      *  
      */
-    void applyBlock(uint64_t* tmp, int b, int len, t2val_t* t2vals)
+    void applyBlock(uint64_t* tmp, int b, int len, t2val_t* t2vals) const
     {
         for (int i = 0; i < len; i += 2) {
             uint64_t x = tmp[(b << blockShift) + i];
@@ -324,7 +327,7 @@ private:
      * \param alone_positions reference to an array of indexes that occure only once
      *  
      */
-    int find_alone_positions(std::vector<size_t>& elements, std::vector<t2val_t>& t2vals, std::vector<uint32_t>& alone_positions)
+    int find_alone_positions(const std::vector<size_t>& elements, std::vector<t2val_t>& t2vals, std::vector<uint32_t>& alone_positions, uint64_t seed_val) const
     {
         std::fill(t2vals.begin(), t2vals.end(), t2val_t{ 0,0 });
         // number of elements / 2^18 => if more than 2^18 elements, we need 2 blocks
@@ -337,7 +340,7 @@ private:
         std::fill(tmpc.begin(), tmpc.begin() + blocks, 0);
         
         for(size_t k : elements) {
-            uint64_t hash = murmur64(k);
+            uint64_t hash = murmur64(k, seed_val);
             std::array<size_t, 4> h_arr = get_hashes(hash);
             for (int hi = 0; hi < 4; hi++) {
                 int index = h_arr[hi];
@@ -560,7 +563,7 @@ private:
 
                 std::vector<t2val_t> t2vals_vec(bin_size_);
                 std::vector<uint32_t> alone_positions(bin_size_, 0);
-                int alone_position_nr = find_alone_positions(vec, t2vals_vec, alone_positions);
+                int alone_position_nr = find_alone_positions(vec, t2vals_vec, alone_positions, this->seed);
                
                 std::vector<uint64_t> rev_order_i(vec.size(), 0);
                 std::vector<uint8_t> reverse_hi(vec.size(), 0);
@@ -676,19 +679,68 @@ public:
         bool has_failed = false;
         
         while (true) {
-            // Step 1: Start with the filter with the largest cardinality
-            bool success = add_bin_elements(largest_bin_idx, elements[largest_bin_idx], largest_max_stash);
+            // Step 1: Multi-threaded seed search for the largest filter
+            int num_threads = omp_get_max_threads();
+            std::vector<size_t> test_seeds(num_threads);
+            ::std::random_device random;
+            for (int i=0; i<num_threads; ++i) {
+                uint64_t s = random();
+                s <<= 32;
+                s |= random();
+                test_seeds[i] = s;
+            }
 
-            if (!success) {
-                has_failed = true;
-                std::cerr << " [Failed on IBFF4, largest bin id: (" << largest_bin_idx << ")] ... " << std::flush;
-                clear();
-                for (auto & stash : bin_stashes) {
-                    stash.clear();
+            std::vector<uint64_t> best_stash;
+            std::vector<uint64_t> best_rev_order;
+            std::vector<uint8_t> best_reverse_h;
+            size_t best_stacksize = 0;
+            size_t best_seed = 0;
+            bool any_success = false;
+            size_t min_stash_size = -1;
+
+            #pragma omp parallel for
+            for (int i=0; i<num_threads; ++i) {
+                std::vector<uint64_t> local_stash;
+                std::vector<uint64_t> local_rev_order;
+                std::vector<uint8_t> local_reverse_h;
+                size_t local_stacksize = 0;
+                
+                bool local_success = try_build_bin(largest_bin_idx, elements[largest_bin_idx], largest_max_stash, test_seeds[i], local_stash, local_rev_order, local_reverse_h, local_stacksize);
+                
+                if (local_success) {
+                    #pragma omp critical
+                    {
+                        if (!any_success || local_stash.size() < min_stash_size) {
+                            any_success = true;
+                            min_stash_size = local_stash.size();
+                            best_stash = std::move(local_stash);
+                            best_rev_order = std::move(local_rev_order);
+                            best_reverse_h = std::move(local_reverse_h);
+                            best_stacksize = local_stacksize;
+                            best_seed = test_seeds[i];
+                        }
+                    }
                 }
-                set_seed();
+            }
+
+            if (!any_success) {
+                std::cerr << " [Failed on IBFF largest bin, retrying with new seeds] ... " << std::flush;
                 continue;
             }
+            
+            // Apply the best seed found
+            this->seed = best_seed;
+            bin_stashes[largest_bin_idx] = std::move(best_stash);
+            fill_filter(best_rev_order, best_reverse_h, largest_bin_idx, best_stacksize);
+            
+            if (!bin_stashes[largest_bin_idx].empty()) {
+                std::cerr << "Bin " << largest_bin_idx << " stash build stats: "
+                          << "max_cardinality (max_bin_elements): " << max_bin_elements << ", "
+                          << "Hashes inserted (this bin): " << elements[largest_bin_idx].size() << ", "
+                          << "Hashes in filter: " << best_stacksize << ", "
+                          << "Hashes in stash: " << bin_stashes[largest_bin_idx].size() << std::endl;
+            }
+
             
             // Step 2: Continue, in parallel, with the rest of the filters
             bool all_success = true;
@@ -871,6 +923,157 @@ public:
 	 *  }
      * 
      */
+    
+    bool try_build_bin(size_t bin, std::vector<size_t> elements, uint32_t current_max_stash, uint64_t seed_val,
+                       std::vector<uint64_t>& out_stash, std::vector<uint64_t>& out_rev_order,
+                       std::vector<uint8_t>& out_reverse_h, size_t& out_stacksize) const
+    {
+        std::sort(elements.begin(), elements.end());
+        auto last_unique = std::unique(elements.begin(), elements.end());
+        elements.erase(last_unique, elements.end());
+        
+        size_t size = elements.size();
+        if (size == 0) return true;
+        
+        out_stash.clear();
+        
+        static thread_local std::vector<t2val_t> t2vals_vec;
+        if (t2vals_vec.size() < bin_size_) t2vals_vec.resize(bin_size_);
+        
+        static thread_local std::vector<uint32_t> alone_positions;
+        if (alone_positions.size() < bin_size_) alone_positions.resize(bin_size_);
+        
+        if (out_rev_order.size() < size) out_rev_order.resize(size);
+        if (out_reverse_h.size() < size) out_reverse_h.resize(size);
+        
+        static thread_local std::vector<uint8_t> key_status;
+        if (key_status.size() < size) key_status.resize(size);
+        std::fill(key_status.begin(), key_status.begin() + size, 0);
+        
+        int alone_position_nr = find_alone_positions(elements, t2vals_vec, alone_positions, seed_val);
+        
+        uint32_t duplicates = 0;
+        for (size_t ki = 0; ki < size; ki++) {
+            uint64_t hash = murmur64(elements[ki], seed_val);
+            std::array<size_t, 4> h_arr = get_hashes(hash);
+            uint32_t h0 = h_arr[0], h1 = h_arr[1], h2 = h_arr[2], h3 = h_arr[3];
+            
+            if ((t2vals_vec[h0].t2 & t2vals_vec[h1].t2 & t2vals_vec[h2].t2 & t2vals_vec[h3].t2) == 0) {
+                if ((t2vals_vec[h0].t2 == 0 && t2vals_vec[h0].t2count == 2)
+                 || (t2vals_vec[h1].t2 == 0 && t2vals_vec[h1].t2count == 2)
+                 || (t2vals_vec[h2].t2 == 0 && t2vals_vec[h2].t2count == 2)
+                 || (t2vals_vec[h3].t2 == 0 && t2vals_vec[h3].t2count == 2)) {
+                    key_status[ki] = 1;
+                    duplicates++;
+                    t2vals_vec[h0].t2count--;
+                    t2vals_vec[h0].t2 ^= hash;
+                    if (t2vals_vec[h0].t2count == 1) alone_positions[alone_position_nr++] = h0;
+                    t2vals_vec[h1].t2count--;
+                    t2vals_vec[h1].t2 ^= hash;
+                    if (t2vals_vec[h1].t2count == 1) alone_positions[alone_position_nr++] = h1;
+                    t2vals_vec[h2].t2count--;
+                    t2vals_vec[h2].t2 ^= hash;
+                    if (t2vals_vec[h2].t2count == 1) alone_positions[alone_position_nr++] = h2;
+                    t2vals_vec[h3].t2count--;
+                    t2vals_vec[h3].t2 ^= hash;
+                    if (t2vals_vec[h3].t2count == 1) alone_positions[alone_position_nr++] = h3;
+                }
+            }
+        }
+        
+        size_t stacksize = 0;
+        size_t key_cursor = 0;
+        uint32_t stash_count = 0;
+        bool construction_failed = false;
+    
+        while (true) {
+            while (alone_position_nr > 0) {
+                int i = alone_positions[--alone_position_nr];
+                if (t2vals_vec[i].t2count == 0 || t2vals_vec[i].t2count > 1) {
+                    continue;
+                }
+                
+                uint64_t hash = t2vals_vec[i].t2;
+                uint8_t found = -1;
+                
+                std::array<size_t, 4> h_arr = get_hashes(hash);
+                for (int hi = 0; hi < 4; hi++) {
+                    int h = h_arr[hi];
+                    if (h == i) {
+                        found = (uint8_t) hi;
+                        t2vals_vec[i].t2count = 0;
+                    } else {
+                        if (t2vals_vec[h].t2count > 0) {
+                            t2vals_vec[h].t2count--;
+                            t2vals_vec[h].t2 ^= hash;
+                            if (t2vals_vec[h].t2count == 1) {
+                                alone_positions[alone_position_nr++] = h;
+                            }
+                        }
+                    }
+                }
+                out_rev_order[stacksize] = hash;
+                out_reverse_h[stacksize] = found;
+                stacksize++;
+            }
+        
+            if (stacksize + duplicates + stash_count == size) {
+                break;
+            }
+        
+            bool found_victim = false;
+            while (key_cursor < size) {
+                if (key_status[key_cursor] == 0) {
+                    uint64_t key = elements[key_cursor];
+                    uint64_t hash = murmur64(key, seed_val);
+                    std::array<size_t, 4> h_arr = get_hashes(hash);
+                    uint32_t h0 = h_arr[0], h1 = h_arr[1], h2 = h_arr[2], h3 = h_arr[3];
+                    
+                    if (t2vals_vec[h0].t2count >= 1 && t2vals_vec[h1].t2count >= 1 && t2vals_vec[h2].t2count >= 1 && t2vals_vec[h3].t2count >= 1) {
+                        out_stash.push_back(key);
+                        stash_count++;
+                        
+                        if (stash_count > current_max_stash) {
+                            construction_failed = true;
+                            break;
+                        }
+                        
+                        key_status[key_cursor] = 1;
+                        t2vals_vec[h0].t2count--; t2vals_vec[h0].t2 ^= hash; if (t2vals_vec[h0].t2count == 1) alone_positions[alone_position_nr++] = h0;
+                        t2vals_vec[h1].t2count--; t2vals_vec[h1].t2 ^= hash; if (t2vals_vec[h1].t2count == 1) alone_positions[alone_position_nr++] = h1;
+                        t2vals_vec[h2].t2count--; t2vals_vec[h2].t2 ^= hash; if (t2vals_vec[h2].t2count == 1) alone_positions[alone_position_nr++] = h2;
+                        t2vals_vec[h3].t2count--; t2vals_vec[h3].t2 ^= hash; if (t2vals_vec[h3].t2count == 1) alone_positions[alone_position_nr++] = h3;
+                        
+                        found_victim = true;
+                        break;
+                    } else {
+                        key_status[key_cursor] = 1;
+                    }
+                }
+                key_cursor++;
+            }
+        
+            if (construction_failed) break;
+            if (!found_victim && (stacksize + duplicates + stash_count != size)) {
+                construction_failed = true;
+                break;
+            }
+            if (found_victim && (stacksize + duplicates + stash_count < size)) continue;
+            break;
+        }
+    
+        if (construction_failed) return false;
+        
+        if (!out_stash.empty()) {
+            std::sort(out_stash.begin(), out_stash.end());
+            auto last = std::unique(out_stash.begin(), out_stash.end());
+            out_stash.erase(last, out_stash.end());
+        }
+        
+        out_stacksize = stacksize;
+        return true;
+    }
+
     bool add_bin_elements(size_t bin, std::vector<size_t>& elements, uint32_t current_max_stash)
     {
         // Binary fuse filter construction with victim selection and stash support
@@ -916,7 +1119,7 @@ public:
             std::fill(key_status.begin(), key_status.begin() + size, 0);
             
             // Find initial alone positions
-            int alone_position_nr = find_alone_positions(elements, t2vals_vec, alone_positions);
+            int alone_position_nr = find_alone_positions(elements, t2vals_vec, alone_positions, this->seed);
             
             // Graph-level duplicate detection using XOR-cancellation.
             // After graph construction, if two identical hashes mapped to the same positions,
