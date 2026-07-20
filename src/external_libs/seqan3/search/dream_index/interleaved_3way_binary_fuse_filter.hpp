@@ -450,10 +450,11 @@ private:
      * 
      *  
      */
-    void fill_filter(sdsl::int_vector<>& reverse_order, sdsl::int_vector<>& reverse_h, uint bin)
+    template <typename RevOrderVec, typename RevHVec>
+    void fill_filter(const RevOrderVec& reverse_order, const RevHVec& reverse_h, uint bin, size_t stacksize)
     {
         
-        for (int i = reverse_order.size() - 1; i >= 0; i--) 
+        for (int i = stacksize - 1; i >= 0; i--) 
         {
             // the hash of the key we insert next
             uint64_t hash = reverse_order[i];
@@ -544,7 +545,7 @@ private:
         {
             //if (elements[i].size() == 0)
             //    continue;
-            fill_filter(reverse_orders[i], reverse_hs[i], i);
+            fill_filter(reverse_orders[i], reverse_hs[i], i, reverse_orders[i].size());
         }
         
     }
@@ -1234,7 +1235,7 @@ public:
         reverse_h.resize(stacksize);
 
         // Fill filter with successfully peeled elements
-        fill_filter(rev_order, reverse_h, bin);
+        fill_filter(rev_order, reverse_h, bin, stacksize);
         
         // Print statistics for builds that use stash
         if (!bin_stashes[bin].empty()) {
